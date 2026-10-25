@@ -1,37 +1,38 @@
-# TCL Display
+<p align="center"><img src="assets/icon.png" width="112" alt="TCL Display"></p>
+<h1 align="center">TCL Display</h1>
+<p align="center">Телевизор как экран Windows — под управлением Home Assistant</p>
 
-A small native Windows background app paired with a Home Assistant integration exposing **a display switch and a primary-display preference switch**. [Инструкция на русском](README.ru.md).
+<p align="center"><a href="https://github.com/BrainDeLook/tcl-display/releases/latest/download/TCL-Display-Setup.exe"><b>⬇ Скачать установщик Windows</b></a> · <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=BrainDeLook&amp;repository=tcl-display&amp;category=integration"><b>Добавить в HACS</b></a> · <a href="README.en.md">English</a></p>
 
-Switch on connects the selected monitor to the Windows desktop; switch off disconnects it, like Windows Display Settings. It does not control TV power. Status is polled every 15 seconds and confirmed immediately after commands. An offline PC or missing monitor makes the switch unavailable. Setup and polling never change the display automatically.
+**Приложение, интеграция, иконки и все релизы находятся в этом репозитории.** Для ПК нужен файл **TCL-Display-Setup.exe**. Интеграция устанавливается через HACS; искать её в другом репозитории не требуется.
 
-## Windows
+| Что нужно | Где взять |
+| --- | --- |
+| Установить или обновить приложение на ПК | [Скачать TCL-Display-Setup.exe](https://github.com/BrainDeLook/tcl-display/releases/latest/download/TCL-Display-Setup.exe) |
+| Установить интеграцию в HA | [Открыть HACS](https://my.home-assistant.io/redirect/hacs_repository/?owner=BrainDeLook&repository=tcl-display&category=integration) |
+| Полная инструкция и перенос старых настроек | [Инструкция на русском](README.ru.md) |
+| Ручная установка интеграции без HACS | [TCL-Display-HA.zip](https://github.com/BrainDeLook/tcl-display/releases/latest/download/TCL-Display-HA.zip) — распаковать в `/config`, затем перезапустить HA |
 
-Download `TCL-Display-Windows-v1.5.zip` from the [latest release](https://github.com/BrainDeLook/tcl-display/releases/latest). Extract to a permanent folder and start the EXE. Select the display, check the PC address, enter your HA IPv4 address for the firewall rule, save, allow HA access through the Windows prompt, and start the listener. Copy the connection code from the HA setup tab.
+## Быстрый старт
 
-The app uses C/Win32 with no Python/.NET runtime. Tray visibility and close-to-background versus exit are independent settings. Relaunching shows a hidden window. The Exit button always exits. For upgrades, exit the old app and replace its EXE while keeping `agent.ini`.
+1. **ПК:** скачай установщик, нажми «Установить» и открой TCL Display из меню «Пуск». Программа хранится в `%LocalAppData%\Programs\TCL Display`, настройки — в `%LocalAppData%\TCL Display`. Старую portable-версию сначала заверши; её `agent.ini` можно перенести через мастер установки.
+2. **Приложение:** выбери дисплей, сохрани настройки, разреши доступ HA и запусти обработчик. Во вкладке «Настройка HA» скопируй строку подключения.
+3. **HA:** добавь этот репозиторий в обычный HACS как **Интеграцию**, установи TCL Display и перезапусти HA. Для уже установленной версии обновись до **0.4.0**. Если кнопка HACS не открывается, добавь вручную `https://github.com/BrainDeLook/tcl-display`.
+4. **Подключение:** Настройки → Устройства и службы → Добавить интеграцию → TCL Display. Вставь строку из приложения. При обновлении повторное подключение не нужно.
 
-## Home Assistant
+## Два переключателя
 
-1. In regular HACS, add `https://github.com/BrainDeLook/tcl-display` as a custom **Integration** repository. Install TCL Display and restart HA. Existing installations: update to 0.3.0 and restart.
-2. Settings → Devices & services → Add integration → TCL Display. Paste the Windows connection code and optionally name the device.
-3. The device exposes **Windows display** and a configuration switch, **Make TV primary** (off by default). Use its actual entity ID with `switch.turn_on` / `switch.turn_off` in your existing scripts or automations.
+- **Дисплей Windows** — подключает телевизор к рабочему столу Windows или программно отключает его. Это действие соответствует настройке «Отключить этот дисплей», а не питанию ТВ.
+- **Делать ТВ основным** — отдельная настройка в разделе конфигурации устройства. Когда режим включён, следующая команда подключения делает ТВ основным, а отключение возвращает прежний монитор. Память о нём сохраняется после перезапуска. По умолчанию режим выключен.
 
-No TV, volume, ADB, source scripts or media player configuration is required. Connect this switch to your existing media player yourself. Version 0.1.0 settings migrate automatically: the display switch identity is preserved; obsolete media player, auto-sync switch and connection sensor belonging to this integration are removed. Existing Universal Players are untouched. Reconfigure the integration to change address/key.
+Привяжи переключатель дисплея к своим существующим скриптам HDMI или медиаплееру. Интеграция сама не переключает входы телевизора.
 
-The code contains a secret: keep it private. Use only on a trusted LAN (HTTP with key, no TLS); never forward the port to the internet. Reserve the PC IP in DHCP. The firewall helper allows the specified HA IPv4 on private networks.
+Приложение нативное, без .NET, Python и HASS.Agent. Есть автозапуск, скрытие в фон и независимая настройка значка в трее. Обновление — повторным запуском установщика, удаление — через список приложений Windows. Настройки сохраняются.
 
-The last active display cannot be disabled. Enabling adds the display to the right of existing monitors; full HDR/refresh/layout profiles are not restored. Driver behavior needs verification on your hardware.
+Подключение предназначено для доверенной домашней сети. Не открывай порт в интернет и не публикуй строку подключения: она содержит ключ.
 
-## Make TV primary
+[Все релизы](https://github.com/BrainDeLook/tcl-display/releases) · [Сообщить о проблеме](https://github.com/BrainDeLook/tcl-display/issues)
 
-Enable the separate **Make TV primary** configuration switch. It stores a preference without changing the desktop immediately. On the next display-on command, the app remembers the current primary monitor and makes the TV primary; display-off restores the previous primary. A repeated on command also works when the TV is already connected.
+## Сборка
 
-The previous monitor is saved in `agent.ini` before applying changes and survives app/Windows restarts. Repeated on commands do not overwrite it with the TV. If the old monitor is unplugged, a remaining active monitor becomes primary. Disabling the preference while the TV is primary still preserves the pending restoration on display-off. Restoration requires an off command through the app/HA; unplugging the cable alone does not trigger it.
-
-The preference is also available in the Windows app's Behavior tab and saves immediately. Update the Windows app to 1.5; older agents keep their display control but cannot expose the new preference. No re-pairing is required. Primary switching translates desktop coordinates as described in [Microsoft's source-mode documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_source_mode).
-
-## Development
-
-HA code: `custom_components/tcl_display`. Native app: `windows/src`; build with `windows/build.ps1` and Zig 0.13. CI runs protocol tests, real Home Assistant integration tests, hassfest and HACS validation.
-
-Native regression tests: `windows/test.ps1 -Zig <path-to-zig.exe>`; synthetic topology, no physical display changes.
+Исходники Windows — `windows/`, интеграция — `custom_components/tcl_display/`, фирменные изображения — `assets/` и `brand/`. Сборка приложения: `windows/build.ps1` (Zig 0.13); установщика: `windows/build-installer.ps1` (Inno Setup 6). CI проверяет протокол, Home Assistant, HACS, нативную логику, установку, обновление и удаление.

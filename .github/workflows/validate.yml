@@ -36,7 +36,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
 
   native:
     runs-on: windows-latest
@@ -53,3 +52,12 @@ jobs:
           $zig = "$PWD/zig/zig-windows-x86_64-0.13.0/zig.exe"
           ./windows/test.ps1 -Zig $zig
           ./windows/build.ps1 -Zig $zig -OutputDirectory "$PWD/dist"
+          $iscc = Get-ChildItem "${env:ProgramFiles(x86)}/Inno Setup*/ISCC.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if (!$iscc) { throw 'Inno Setup compiler not available on Windows runner' }
+          ./windows/build-installer.ps1 -Iscc $iscc -BuildDirectory "$PWD/dist" -OutputDirectory "$PWD/release"
+          ./windows/build-installer.ps1 -Iscc $iscc -BuildDirectory "$PWD/dist" -OutputDirectory "$PWD/test-release" -TestBuild
+          ./windows/test-installer.ps1 -Installer "$PWD/test-release/TCL-Display-Setup.exe" -TestRoot "$env:RUNNER_TEMP/tcl-installer-test"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-installer
+          path: release/TCL-Display-Setup.exe

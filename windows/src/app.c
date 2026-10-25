@@ -186,11 +186,11 @@ static int export_yaml(int inform) {
     WCHAR text[10000], filename[MAX_PATH];
     GetWindowTextW(yaml_edit, text, 10000);
     char utf8[20000]; int length = WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8, sizeof(utf8), NULL, NULL);
-    swprintf(filename, MAX_PATH, L"%ls\\connection.txt", folder);
+    swprintf(filename, MAX_PATH, L"%ls\\connection.txt", data_folder);
     FILE *file = _wfopen(filename, L"wb");
-    if (!file) { message(L"Не удалось сохранить строку подключения. Перемести папку в доступное для записи место.", MB_ICONERROR); return 0; }
+    if (!file) { message(L"Не удалось сохранить строку подключения в AppData. Проверь доступ к папке настроек.", MB_ICONERROR); return 0; }
     fwrite(utf8, 1, length-1, file); fclose(file);
-    if (inform) message(L"Строка подключения сохранена в connection.txt рядом с приложением.", MB_ICONINFORMATION);
+    if (inform) message(L"Строка подключения сохранена в AppData\\TCL Display\\connection.txt.", MB_ICONINFORMATION);
     return 1;
 }
 static int autostart_set(int enable) {
@@ -455,13 +455,14 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
         case ID_OFF: toggle_display(0); break;
         case ID_COPY: copy_yaml(); break;
         case ID_EXPORT: yaml_update(); export_yaml(1); break;
-        case ID_FILES: ShellExecuteW(hwnd,L"open",folder,NULL,NULL,SW_SHOWNORMAL); break;
+        case ID_FILES: ShellExecuteW(hwnd,L"open",data_folder,NULL,NULL,SW_SHOWNORMAL); break;
         case ID_WINDOWS: ShellExecuteW(hwnd,L"open",L"ms-settings:display",NULL,NULL,SW_SHOWNORMAL); break;
         case ID_FIREWALL:
             if (thread) { message(L"Останови обработчик, сохрани IPv4 Home Assistant и повтори.",MB_ICONINFORMATION); break; }
             if (!save_settings()) break;
             if (!valid_ipv4(ha_ip)) { message(L"Укажи IPv4 Home Assistant и сохрани настройки.",MB_ICONWARNING); break; }
-            { HINSTANCE result=ShellExecuteW(hwnd,L"runas",executable,L"--firewall",folder,SW_SHOWNORMAL);
+            { WCHAR arguments[MAX_PATH+32]; swprintf(arguments,MAX_PATH+32,L"--firewall \"%ls\"",ini);
+              HINSTANCE result=ShellExecuteW(hwnd,L"runas",executable,arguments,folder,SW_SHOWNORMAL);
               if ((INT_PTR)result<=32) message(L"Настройка брандмауэра не выполнена. Для неё нужно подтвердить запрос Windows.",MB_ICONWARNING); }
             break;
         case 230: open_file(L"НАСТРОЙКА-HA.txt"); break;
@@ -493,8 +494,17 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
 }
 int WINAPI WinMain(HINSTANCE inst,HINSTANCE previous,LPSTR command,int show) {
     (void)previous; (void)show;
-    instance=inst; paths_init();GetModuleFileNameW(NULL,executable,MAX_PATH);
-    if (!strcmp(command,"--firewall")) return firewall_helper();
+    instance=inst;
+    LONG path_error=paths_init();
+    if(path_error){error_code(L"Не удалось открыть папку настроек в AppData.",path_error);return 1;}
+    GetModuleFileNameW(NULL,executable,MAX_PATH);
+    int argument_count=0;
+    WCHAR **arguments=CommandLineToArgvW(GetCommandLineW(),&argument_count);
+    if(arguments && argument_count>=2 && !wcscmp(arguments[1],L"--firewall")) {
+        if(argument_count==3 && wcslen(arguments[2])<MAX_PATH) wcscpy(ini,arguments[2]);
+        LocalFree(arguments); return firewall_helper();
+    }
+    if(arguments)LocalFree(arguments);
     if (!strcmp(command,"--dry-run")) { dry=1;return serve(); }
     HANDLE single=CreateMutexW(NULL,FALSE,APP_MUTEX_NAME);
     if (!single||GetLastError()==ERROR_ALREADY_EXISTS) {
@@ -504,9 +514,9 @@ int WINAPI WinMain(HINSTANCE inst,HINSTANCE previous,LPSTR command,int show) {
     INITCOMMONCONTROLSEX common={sizeof(common),ICC_TAB_CLASSES};InitCommonControlsEx(&common);
     InitializeCriticalSection(&display_lock);stop_event=CreateEventW(NULL,TRUE,FALSE,NULL);
     WSADATA winsock; if(WSAStartup(MAKEWORD(2,2),&winsock)) return 1;
-    WNDCLASSW cls={0};cls.lpfnWndProc=procedure;cls.hInstance=inst;cls.lpszClassName=APP_CLASS_NAME;cls.hCursor=LoadCursorW(NULL,IDC_ARROW);cls.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);cls.hIcon=LoadIconW(NULL,IDI_APPLICATION);RegisterClassW(&cls);
+    WNDCLASSW cls={0};cls.lpfnWndProc=procedure;cls.hInstance=inst;cls.lpszClassName=APP_CLASS_NAME;cls.hCursor=LoadCursorW(NULL,IDC_ARROW);cls.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);cls.hIcon=LoadIconW(inst,MAKEINTRESOURCEW(101));RegisterClassW(&cls);
     RECT rect={0,0,px(780),px(784)};AdjustWindowRect(&rect,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,FALSE);
-    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.5 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
+    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.6 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
     if(!window)return 1;
     tray.cbSize=sizeof(tray);tray.hWnd=window;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=cls.hIcon;wcscpy(tray.szTip,L"TCL Display — управление из Home Assistant");
     taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");tray_apply();

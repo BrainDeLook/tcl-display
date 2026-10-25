@@ -9,13 +9,14 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <bcrypt.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 
 /* Native Windows display receiver. No arbitrary command execution. */
-static WCHAR folder[MAX_PATH], ini[MAX_PATH], selected[1024];
+static WCHAR folder[MAX_PATH], data_folder[MAX_PATH], ini[MAX_PATH], selected[1024];
 static char secret[65];
 static int port = 8766, dry = 0;
 static const char *last_error = "none";
@@ -257,11 +258,25 @@ static void print_w(const WCHAR *w) {
     WideCharToMultiByte(CP_UTF8, 0, w, -1, text, sizeof(text), NULL, NULL);
     printf("%s", text);
 }
-static void paths_init(void) {
-    GetModuleFileNameW(NULL, folder, MAX_PATH);
+static LONG paths_init(void) {
+    if (!GetModuleFileNameW(NULL, folder, MAX_PATH)) return GetLastError();
     WCHAR *slash = wcsrchr(folder, L'\\');
     if (slash) *slash = 0;
-    swprintf(ini, MAX_PATH, L"%ls\\agent.ini", folder);
+#ifdef TCL_TEST_BUILD
+    wcscpy(data_folder, folder);
+#else
+    WCHAR local[MAX_PATH];
+    if (SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA | CSIDL_FLAG_CREATE, NULL, SHGFP_TYPE_CURRENT, local) != S_OK)
+        return ERROR_PATH_NOT_FOUND;
+    if (swprintf(data_folder, MAX_PATH, L"%ls\\TCL Display", local) < 0) return ERROR_FILENAME_EXCED_RANGE;
+    if (!CreateDirectoryW(data_folder, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) return GetLastError();
+#endif
+    swprintf(ini, MAX_PATH, L"%ls\\agent.ini", data_folder);
+    /* One-time portable migration, never overwrite the installed configuration. */
+    WCHAR old_ini[MAX_PATH]; swprintf(old_ini, MAX_PATH, L"%ls\\agent.ini", folder);
+    if (_wcsicmp(old_ini, ini) && GetFileAttributesW(ini) == INVALID_FILE_ATTRIBUTES &&
+        GetFileAttributesW(old_ini) != INVALID_FILE_ATTRIBUTES && !CopyFileW(old_ini, ini, TRUE)) return GetLastError();
+    return 0;
 }
 static int load_config(void) {
     WCHAR key[100];
@@ -313,7 +328,7 @@ static int setup(int just_list) {
         !WritePrivateProfileStringW(L"agent", L"port", port_text, ini)) {
         puts("Cannot write agent.ini. Move this folder to a writable location."); return 1;
     }
-    WCHAR yaml[MAX_PATH]; swprintf(yaml, MAX_PATH, L"%ls\\home-assistant.generated.yaml", folder);
+    WCHAR yaml[MAX_PATH]; swprintf(yaml, MAX_PATH, L"%ls\\home-assistant.generated.yaml", data_folder);
     FILE *f = _wfopen(yaml, L"wb");
     if (!f) return 1;
     fprintf(f, "# Replace WINDOWS_PC_IP with your PC's LAN IPv4 address.\n"
@@ -423,7 +438,7 @@ static int serve(void) {
 }
 int main(int argc, char **argv) {
     SetConsoleOutputCP(CP_UTF8);
-    paths_init();
+    if (paths_init()) return 1;
     if (argc > 1 && !strcmp(argv[1], "list")) return setup(1);
     if (argc > 1 && !strcmp(argv[1], "setup")) return setup(0);
     if (argc > 1 && !strcmp(argv[1], "--dry-run")) dry = 1;
