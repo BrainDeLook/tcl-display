@@ -1,36 +1,19 @@
-"""Integration-level tests against actual Home Assistant APIs (Linux CI)."""
+"""Exercise the switch-only bridge against real Home Assistant APIs in CI."""
 
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 pytest.importorskip("homeassistant")
-
 from homeassistant import data_entry_flow
-from homeassistant.core import SupportsResponse
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.tcl_display.api import AgentError
+from custom_components.tcl_display.api import AgentError, InvalidAuth
 from custom_components.tcl_display.const import DOMAIN
 
-DATA = {
-    "host": "127.0.0.1",
-    "port": 8766,
-    "key": "a" * 64,
-    "tv_entity": "media_player.tcl",
-    "volume_entity": "number.jbl_volume",
-    "auto_sync": True,
-    "hdmi1_name": "HDMI 1 Homatics",
-    "hdmi1_script": "script.hdmi1",
-    "hdmi2_name": "HDMI 2",
-    "hdmi2_script": "script.hdmi2",
-    "native_name": "Google TV",
-    "native_script": "script.native",
-    "hdmi3_name": "HDMI 3 PC",
-    "hdmi3_script": "script.hdmi3",
-}
-NATIVE = "TvInputHardwareManager Info:\nmainSessionToken: null\nmResumedActivity: u0 com.gathin.tvhome/.MainActivity\n"
+DATA = {"host": "127.0.0.1", "port": 8766, "key": "a" * 64}
+CODE = "tcl-display://127.0.0.1:8766?key=" + "a" * 64
 
 
 @pytest.fixture(autouse=True)
@@ -40,123 +23,103 @@ def enable_component(enable_custom_integrations):
 
 @pytest.fixture
 async def prepared(hass):
-    hass.config.components.add("androidtv")
-    hass.states.async_set("media_player.tcl", "idle")
-    hass.states.async_set("number.jbl_volume", "30", {"min": 10, "max": 50, "step": 2})
-    for script in ("hdmi1", "hdmi2", "native", "hdmi3"):
-        hass.states.async_set(f"script.{script}", "off")
-
-        async def run_script(call):
-            pass
-
-        hass.services.async_register("script", script, run_script)
-
-    async def adb(call):
-        return {"media_player.tcl": {"adb_response": NATIVE}}
-
-    hass.services.async_register("androidtv", "adb_command", adb, supports_response=SupportsResponse.ONLY)
     with (
         patch("custom_components.tcl_display.api.AgentClient.status", new_callable=AsyncMock) as status,
-        patch(
-            "custom_components.tcl_display.api.AgentClient.set_enabled", new_callable=AsyncMock
-        ) as set_enabled,
+        patch("custom_components.tcl_display.api.AgentClient.set_enabled", new_callable=AsyncMock) as command,
     ):
         status.return_value = {"ok": True, "enabled": False, "available": True}
 
-        async def set_result(enabled):
+        async def result(enabled):
             return {"ok": True, "enabled": enabled, "available": True}
 
-        set_enabled.side_effect = set_result
-        yield status, set_enabled
+        command.side_effect = result
+        yield status, command
 
 
 async def setup_entry(hass):
-    entry = MockConfigEntry(domain=DOMAIN, title="TCL TV", unique_id="127.0.0.1:8766", data=DATA)
+    entry = MockConfigEntry(
+        domain=DOMAIN, version=2, title="Windows display", unique_id="127.0.0.1:8766", data=DATA
+    )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    entities = {
-        e.unique_id.rsplit("_", 1)[-1]: e.entity_id
-        for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    }
-    player = next(
-        e.entity_id
-        for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-        if e.domain == "media_player"
-    )
-    return entry, player, entities
+    entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert len(entities) == 1
+    assert entities[0].domain == "switch"
+    return entry, entities[0].entity_id
 
 
-async def test_ui_flow_and_entities(hass, prepared):
+async def test_single_step_pairing(hass, prepared):
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
-    assert result["type"] is data_entry_flow.FlowResultType.FORM
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"connection": "tcl-display://127.0.0.1:8766?key=" + "a" * 64}
-    )
-    assert result["step_id"] == "television"
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {"tv_entity": DATA["tv_entity"], "volume_entity": DATA["volume_entity"], "auto_sync": True},
-    )
-    assert result["step_id"] == "sources"
-    sources = {key: value for key, value in DATA.items() if key.endswith(("_script", "_name"))}
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], sources)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"connection": CODE})
     assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    assert result["data"] == DATA
     await hass.async_block_till_done()
-    assert result["result"].runtime_data.data.source == "native"
+    entities = er.async_entries_for_config_entry(er.async_get(hass), result["result"].entry_id)
+    assert len(entities) == 1 and entities[0].domain == "switch"
+    prepared[1].assert_not_awaited()
 
 
-async def test_volume_uses_actual_number_range(hass, prepared):
-    entry, player, _ = await setup_entry(hass)
-    assert hass.states.get(player).attributes["volume_level"] == 0.5
-    assert hass.states.get(player).attributes["source"] == "Google TV"
-    calls = []
+async def test_commands_and_external_changes(hass, prepared):
+    status, command = prepared
+    entry, entity = await setup_entry(hass)
+    assert hass.states.get(entity).state == "off"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": entity}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(entity).state == "on"
+    command.assert_awaited_once_with(True)
+    # An external Windows change is reflected without undoing it.
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity).state == "off"
+    assert command.await_count == 1
+    await hass.services.async_call("switch", "turn_off", {"entity_id": entity}, blocking=True)
+    command.assert_awaited_with(False)
 
-    async def number_set(call):
-        calls.append(call.data)
 
-    hass.services.async_register("number", "set_value", number_set)
-    await hass.services.async_call(
-        "media_player", "volume_set", {"entity_id": player, "volume_level": 0.75}, blocking=True
-    )
-    assert calls[0]["value"] == 40
-
-
-async def test_pc_offline_does_not_break_tv(hass, prepared):
-    status, _ = prepared
-    entry, player, _ = await setup_entry(hass)
+async def test_offline_and_recovery(hass, prepared):
+    status, command = prepared
+    entry, entity = await setup_entry(hass)
     status.side_effect = AgentError("offline")
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
-    assert hass.states.get(player).state == "idle"
-    assert entry.runtime_data.data.pc_online is False
-
-
-async def test_unknown_source_never_disconnects_windows(hass, prepared):
-    _, enabled = prepared
-    entry, _, _ = await setup_entry(hass)
-
-    async def adb_unknown(call):
-        return {"media_player.tcl": {"adb_response": "unrecognized"}}
-
-    hass.services.async_register(
-        "androidtv", "adb_command", adb_unknown, supports_response=SupportsResponse.ONLY
-    )
-    enabled.reset_mock()
+    assert hass.states.get(entity).state == "unavailable"
+    status.side_effect = None
     await entry.runtime_data.async_refresh()
-    enabled.assert_not_awaited()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity).state == "off"
+    command.assert_not_awaited()
 
 
-async def test_source_transition_does_not_undo_pc_activation(hass, prepared):
-    _, enabled = prepared
-    entry, _, _ = await setup_entry(hass)
-    await entry.runtime_data.async_select_source("hdmi3")
-    assert enabled.await_count == 1
-    enabled.assert_awaited_once_with(True)
+async def test_missing_monitor(hass, prepared):
+    prepared[0].return_value = {"ok": True, "enabled": False, "available": False}
+    _, entity = await setup_entry(hass)
+    assert hass.states.get(entity).state == "unavailable"
 
 
-async def test_reconfigure_keeps_entry_and_entity_ids(hass, prepared):
-    entry, player, _ = await setup_entry(hass)
+async def test_failed_command_is_not_optimistic(hass, prepared):
+    _, entity = await setup_entry(hass)
+    prepared[1].side_effect = AgentError("driver rejected command")
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call("switch", "turn_on", {"entity_id": entity}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(entity).state == "unavailable"
+
+
+@pytest.mark.parametrize(
+    "error,reason", [(AgentError("offline"), "cannot_connect"), (InvalidAuth("key"), "invalid_auth")]
+)
+async def test_connection_errors(hass, prepared, error, reason):
+    prepared[0].side_effect = error
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"connection": CODE})
+    assert result["errors"] == {"base": reason}
+
+
+async def test_reconfigure_preserves_switch(hass, prepared):
+    entry, entity = await setup_entry(hass)
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "reconfigure", "entry_id": entry.entry_id}
     )
@@ -164,26 +127,40 @@ async def test_reconfigure_keeps_entry_and_entity_ids(hass, prepared):
         result["flow_id"], {"connection": "tcl-display://127.0.0.2:8766?key=" + "b" * 64}
     )
     assert result["type"] is data_entry_flow.FlowResultType.ABORT
+    await hass.async_block_till_done()
     assert entry.data["host"] == "127.0.0.2"
-    await hass.async_block_till_done()
+    assert er.async_get(hass).async_get(entity) is not None
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
-    assert er.async_get(hass).async_get(player) is not None
 
 
-async def test_options_can_remove_optional_volume_and_sources(hass, prepared):
-    entry, _, _ = await setup_entry(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["step_id"] == "init"
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"tv_entity": DATA["tv_entity"], "auto_sync": False}
+async def test_v1_migration_only_removes_own_obsolete_entities(hass, prepared):
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        title="TCL TV",
+        data={
+            **DATA,
+            "tv_entity": "media_player.tcl",
+            "auto_sync": True,
+            "hdmi3_script": "script.tcl_hdmi_3",
+        },
+        options={"auto_sync": True},
     )
-    assert result["step_id"] == "sources"
-    values = {key: value for key, value in DATA.items() if key.endswith("_name")}
-    values["hdmi3_script"] = DATA["hdmi3_script"]
-    result = await hass.config_entries.options.async_configure(result["flow_id"], values)
-    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for domain, suffix in [
+        ("media_player", "tv"),
+        ("switch", "auto_sync"),
+        ("binary_sensor", "agent_connection"),
+        ("switch", "pc_display"),
+    ]:
+        registry.async_get_or_create(domain, DOMAIN, f"{entry.entry_id}_{suffix}", config_entry=entry)
+    unrelated = registry.async_get_or_create("media_player", "universal", "existing_tv")
+    switch = registry.async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_pc_display")
+    assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.options["volume_entity"] == ""
-    assert entry.options["hdmi1_script"] == ""
-    assert entry.options["native_script"] == ""
-    assert entry.runtime_data.config["auto_sync"] is False
+    assert entry.version == 2 and dict(entry.data) == DATA and not entry.options
+    entities = er.async_entries_for_config_entry(registry, entry.entry_id)
+    assert [e.entity_id for e in entities] == [switch]
+    assert registry.async_get(unrelated.entity_id) is not None
+    prepared[1].assert_not_awaited()

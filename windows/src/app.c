@@ -361,12 +361,12 @@ static void build_ui(void) {
     control(0,L"STATIC",L"Эти две кнопки меняют конфигурацию дисплеев Windows.",0,28,614,718,24,0);
     control(0,L"STATIC",L"Действие крестика и значок трея настраиваются на вкладке «Поведение».",0,28,646,718,24,0);
 
-    control(1,L"STATIC",L"1. Установи интеграцию TCL Display через HACS и перезапусти HA.\r\n2. Сохрани настройки ПК, разреши доступ HA и запусти обработчик.\r\n3. Скопируй строку ниже в мастер добавления интеграции.\r\n    Редактировать YAML и создавать автоматизации не нужно.",0,28,148,718,90,0);
+    control(1,L"STATIC",L"1. Установи интеграцию TCL Display через HACS и перезапусти HA.\r\n2. Сохрани настройки ПК, разреши доступ HA и запусти обработчик.\r\n3. Скопируй строку ниже в мастер добавления интеграции.\r\n    В HA появится один переключатель дисплея Windows.",0,28,148,718,90,0);
     yaml_edit=control(1,L"EDIT",L"",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|ES_AUTOHSCROLL|WS_VSCROLL|WS_HSCROLL|WS_TABSTOP,28,249,718,110,210);
     control(1,L"BUTTON",L"Копировать строку",WS_TABSTOP,28,379,200,34,ID_COPY);
     control(1,L"BUTTON",L"Сохранить в файл",WS_TABSTOP,242,379,200,34,ID_EXPORT);
     control(1,L"BUTTON",L"Открыть папку",WS_TABSTOP,456,379,200,34,ID_FILES);
-    control(1,L"STATIC",L"В Home Assistant: Настройки → Устройства и службы → Добавить\r\nинтеграцию → TCL Display. Вставь строку и выбери сущность TCL,\r\nгромкость JBL и готовые скрипты HDMI / Google TV из списков.\r\n\r\nИнтеграция создаст медиаплеер и будет сама синхронизировать\r\nдисплей Windows с реальным входом телевизора.\r\n\r\nСтрока содержит ключ доступа. Передавай её только своему HA.",0,28,448,718,190,220);
+    control(1,L"STATIC",L"В Home Assistant: Настройки → Устройства и службы → Добавить\r\nинтеграцию → TCL Display. Вставь строку подключения.\r\n\r\nПоявится один переключатель дисплея Windows: включить —\r\nподключить экран к рабочему столу; выключить — отключить.\r\nСвязь с HDMI и своим медиаплеером настрой отдельно в HA.\r\n\r\nСтрока содержит ключ доступа. Передавай её только своему HA.",0,28,448,718,190,220);
     control(1,L"BUTTON",L"Инструкция HA",WS_TABSTOP,28,672,200,32,230);
     control(1,L"BUTTON",L"Репозиторий HACS",WS_TABSTOP,242,672,200,32,231);
     control(2,L"STATIC",L"Значок в области уведомлений",0,28,153,700,26,0);
@@ -492,7 +492,7 @@ int WINAPI WinMain(HINSTANCE inst,HINSTANCE previous,LPSTR command,int show) {
     WSADATA winsock; if(WSAStartup(MAKEWORD(2,2),&winsock)) return 1;
     WNDCLASSW cls={0};cls.lpfnWndProc=procedure;cls.hInstance=inst;cls.lpszClassName=APP_CLASS_NAME;cls.hCursor=LoadCursorW(NULL,IDC_ARROW);cls.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);cls.hIcon=LoadIconW(NULL,IDI_APPLICATION);RegisterClassW(&cls);
     RECT rect={0,0,px(780),px(784)};AdjustWindowRect(&rect,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,FALSE);
-    window=CreateWindowW(cls.lpszClassName,L"TCL Display — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
+    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.4 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
     if(!window)return 1;
     tray.cbSize=sizeof(tray);tray.hWnd=window;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=cls.hIcon;wcscpy(tray.szTip,L"TCL Display — управление из Home Assistant");
     taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");tray_apply();

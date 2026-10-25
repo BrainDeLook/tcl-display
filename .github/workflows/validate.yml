@@ -13,7 +13,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - run: uv pip install --system pytest pytest-asyncio aiohttp ruff
       - run: ruff check .
-      - run: pytest -q tests/test_api.py tests/test_parser.py
+      - run: pytest -q tests/test_api.py
   homeassistant:
     runs-on: ubuntu-latest
     steps:

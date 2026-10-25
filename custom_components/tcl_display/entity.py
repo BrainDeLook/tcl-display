@@ -16,5 +16,5 @@ class DisplayEntity(CoordinatorEntity):
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=coordinator.entry.title,
             manufacturer="TCL Display",
-            model="TV and Windows display bridge",
+            model="Windows display agent",
         )
