@@ -122,7 +122,9 @@ static LONG change_display(int enable) {
         p.targetInfo.rotation = DISPLAYCONFIG_ROTATION_IDENTITY;
         p.targetInfo.scaling = DISPLAYCONFIG_SCALING_PREFERRED;
         p.targetInfo.refreshRate.Numerator = 0;
-        p.targetInfo.refreshRate.Denominator = 1;
+        /* Both fields must be zero when asking Windows to choose the rate.
+           0/1 is an invalid rate and causes ERROR_INVALID_PARAMETER (87). */
+        p.targetInfo.refreshRate.Denominator = 0;
         p.targetInfo.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
         DISPLAYCONFIG_TARGET_PREFERRED_MODE preferred = {0};
         preferred.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE;

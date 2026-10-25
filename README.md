@@ -6,7 +6,7 @@ Switch on connects the selected monitor to the Windows desktop; switch off disco
 
 ## Windows
 
-Download `TCL-Display-Windows-v1.4.zip` from the [latest release](https://github.com/BrainDeLook/tcl-display/releases/latest). Extract to a permanent folder and start the EXE. Select the display, check the PC address, enter your HA IPv4 address for the firewall rule, save, allow HA access through the Windows prompt, and start the listener. Copy the connection code from the HA setup tab.
+Download `TCL-Display-Windows-v1.4.1.zip` from the [latest release](https://github.com/BrainDeLook/tcl-display/releases/latest). Extract to a permanent folder and start the EXE. Select the display, check the PC address, enter your HA IPv4 address for the firewall rule, save, allow HA access through the Windows prompt, and start the listener. Copy the connection code from the HA setup tab.
 
 The app uses C/Win32 with no Python/.NET runtime. Tray visibility and close-to-background versus exit are independent settings. Relaunching shows a hidden window. The Exit button always exits. For upgrades, exit the old app and replace its EXE while keeping `agent.ini`.
 

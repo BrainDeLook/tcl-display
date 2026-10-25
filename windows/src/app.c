@@ -492,7 +492,7 @@ int WINAPI WinMain(HINSTANCE inst,HINSTANCE previous,LPSTR command,int show) {
     WSADATA winsock; if(WSAStartup(MAKEWORD(2,2),&winsock)) return 1;
     WNDCLASSW cls={0};cls.lpfnWndProc=procedure;cls.hInstance=inst;cls.lpszClassName=APP_CLASS_NAME;cls.hCursor=LoadCursorW(NULL,IDC_ARROW);cls.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);cls.hIcon=LoadIconW(NULL,IDI_APPLICATION);RegisterClassW(&cls);
     RECT rect={0,0,px(780),px(784)};AdjustWindowRect(&rect,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,FALSE);
-    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.4 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
+    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.4.1 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
     if(!window)return 1;
     tray.cbSize=sizeof(tray);tray.hWnd=window;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=cls.hIcon;wcscpy(tray.szTip,L"TCL Display — управление из Home Assistant");
     taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");tray_apply();
