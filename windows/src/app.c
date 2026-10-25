@@ -32,6 +32,7 @@
 #define ID_CLOSE_ACTION 124
 #define ID_SAVE_BEHAVIOR 125
 #define ID_QUIT_BUTTON 126
+#define ID_PRIMARY_MODE 127
 #ifdef TCL_TEST_BUILD
 #define APP_MUTEX_NAME L"Local\\TCLDisplayAppBehaviorTest"
 #define APP_CLASS_NAME L"TCLDisplayAppBehaviorTestWindow"
@@ -46,7 +47,7 @@ static HWND controls[3][40];
 static int ncontrols[3], current_page = 0, scale = 100, configured = 0, settings_dirty = 0;
 static int show_tray_icon = 1, close_to_background = 1, tray_present = 0;
 static UINT taskbar_created;
-static HWND tray_box, close_box;
+static HWND tray_box, close_box, primary_box;
 static HFONT font, title_font;
 static WCHAR monitor_ids[32][1024], pc_ip[80], ha_ip[80];
 static HANDLE thread, stop_event;
@@ -75,6 +76,7 @@ static HWND control(int page, const WCHAR *cls, const WCHAR *text, DWORD style,
 }
 static void page_select(int page) {
     current_page = page;
+    if (page == 2 && primary_box) SendMessageW(primary_box, BM_SETCHECK, primary_mode_enabled() ? BST_CHECKED : BST_UNCHECKED, 0);
     for (int p = 0; p < 3; p++) for (int i = 0; i < ncontrols[p]; i++)
         ShowWindow(controls[p][i], p == page ? SW_SHOW : SW_HIDE);
 }
@@ -361,12 +363,12 @@ static void build_ui(void) {
     control(0,L"STATIC",L"Эти две кнопки меняют конфигурацию дисплеев Windows.",0,28,614,718,24,0);
     control(0,L"STATIC",L"Действие крестика и значок трея настраиваются на вкладке «Поведение».",0,28,646,718,24,0);
 
-    control(1,L"STATIC",L"1. Установи интеграцию TCL Display через HACS и перезапусти HA.\r\n2. Сохрани настройки ПК, разреши доступ HA и запусти обработчик.\r\n3. Скопируй строку ниже в мастер добавления интеграции.\r\n    В HA появится один переключатель дисплея Windows.",0,28,148,718,90,0);
+    control(1,L"STATIC",L"1. Установи интеграцию TCL Display через HACS и перезапусти HA.\r\n2. Сохрани настройки ПК, разреши доступ HA и запусти обработчик.\r\n3. Скопируй строку ниже в мастер добавления интеграции.\r\n    В HA появятся управление дисплеем и режим основного экрана.",0,28,148,718,90,0);
     yaml_edit=control(1,L"EDIT",L"",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|ES_AUTOHSCROLL|WS_VSCROLL|WS_HSCROLL|WS_TABSTOP,28,249,718,110,210);
     control(1,L"BUTTON",L"Копировать строку",WS_TABSTOP,28,379,200,34,ID_COPY);
     control(1,L"BUTTON",L"Сохранить в файл",WS_TABSTOP,242,379,200,34,ID_EXPORT);
     control(1,L"BUTTON",L"Открыть папку",WS_TABSTOP,456,379,200,34,ID_FILES);
-    control(1,L"STATIC",L"В Home Assistant: Настройки → Устройства и службы → Добавить\r\nинтеграцию → TCL Display. Вставь строку подключения.\r\n\r\nПоявится один переключатель дисплея Windows: включить —\r\nподключить экран к рабочему столу; выключить — отключить.\r\nСвязь с HDMI и своим медиаплеером настрой отдельно в HA.\r\n\r\nСтрока содержит ключ доступа. Передавай её только своему HA.",0,28,448,718,190,220);
+    control(1,L"STATIC",L"В Home Assistant: Настройки → Устройства и службы → Добавить\r\nинтеграцию → TCL Display. Вставь строку подключения.\r\n\r\n«Дисплей Windows» подключает и отключает экран.\r\n«Делать ТВ основным» — отдельный режим: при подключении\r\nТВ станет основным, при отключении вернётся прежний экран.\r\nСвязь с HDMI и своим медиаплеером настрой отдельно в HA.\r\n\r\nСтрока содержит ключ доступа. Передавай её только своему HA.",0,28,448,718,190,220);
     control(1,L"BUTTON",L"Инструкция HA",WS_TABSTOP,28,672,200,32,230);
     control(1,L"BUTTON",L"Репозиторий HACS",WS_TABSTOP,242,672,200,32,231);
     control(2,L"STATIC",L"Значок в области уведомлений",0,28,153,700,26,0);
@@ -378,6 +380,8 @@ static void build_ui(void) {
     control(2,L"STATIC",L"В фоновом режиме окно скрыто, а обработчик продолжает принимать\r\nкоманды Home Assistant. Значок в трее можно отключить независимо.\r\n\r\nЧтобы вернуть окно без значка, снова запусти TCL-Display.exe.\r\nВторой экземпляр не создаётся: откроются настройки работающего.\r\n\r\n«Завершить» внизу окна всегда полностью останавливает приложение.",0,28,340,718,160,0);
     control(2,L"BUTTON",L"Применить поведение",WS_TABSTOP,28,526,250,38,ID_SAVE_BEHAVIOR);
     control(2,L"STATIC",L"Эти настройки можно менять при работающем обработчике.",0,28,586,718,55,240);
+    primary_box=control(2,L"BUTTON",L"При подключении делать ТВ основным",BS_AUTOCHECKBOX|WS_TABSTOP,28,640,718,26,ID_PRIMARY_MODE);
+    control(2,L"STATIC",L"Режим сохраняется сразу; им также управляет отдельный переключатель HA.\r\nПри отключении ТВ вернётся прежний основной монитор.",0,28,674,718,44,0);
     status_text=CreateWindowW(L"STATIC",L"Обработчик остановлен.",WS_CHILD|WS_VISIBLE,px(28),px(730),px(556),px(40),window,NULL,instance,NULL);
     SendMessageW(status_text,WM_SETFONT,(WPARAM)font,TRUE);
     HWND quit=CreateWindowW(L"BUTTON",L"Завершить",WS_CHILD|WS_VISIBLE|WS_TABSTOP,px(610),px(730),px(136),px(32),window,(HMENU)ID_QUIT_BUTTON,instance,NULL);
@@ -405,6 +409,7 @@ static void load_ui(void) {
     }
     SendMessageW(auto_box,BM_SETCHECK,auto_enabled?BST_CHECKED:BST_UNCHECKED,0);
     behavior_load();
+    SendMessageW(primary_box, BM_SETCHECK, primary_mode_enabled() ? BST_CHECKED : BST_UNCHECKED, 0);
     refresh_displays(); update_display_status(); yaml_update();
     settings_dirty = 0;
     update_controls();
@@ -431,6 +436,15 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
         if (HIWORD(w)!=BN_CLICKED) return 0;
         switch(id) {
         case ID_SAVE: save_settings(); break;
+        case ID_PRIMARY_MODE: {
+            EnterCriticalSection(&display_lock);
+            BOOL ok = WritePrivateProfileStringW(L"display", L"make_primary",
+                SendMessageW(primary_box, BM_GETCHECK, 0, 0) == BST_CHECKED ? L"1" : L"0", ini);
+            LeaveCriticalSection(&display_lock);
+            if (!ok) { error_code(L"Не удалось сохранить режим основного экрана.", GetLastError());
+                SendMessageW(primary_box, BM_SETCHECK, primary_mode_enabled() ? BST_CHECKED : BST_UNCHECKED, 0); }
+            break;
+        }
         case ID_SAVE_BEHAVIOR: behavior_save(); break;
         case ID_AUTO: case ID_RUN: settings_dirty=1; update_controls(); break;
         case ID_REFRESH: refresh_displays(); update_display_status(); break;
@@ -492,7 +506,7 @@ int WINAPI WinMain(HINSTANCE inst,HINSTANCE previous,LPSTR command,int show) {
     WSADATA winsock; if(WSAStartup(MAKEWORD(2,2),&winsock)) return 1;
     WNDCLASSW cls={0};cls.lpfnWndProc=procedure;cls.hInstance=inst;cls.lpszClassName=APP_CLASS_NAME;cls.hCursor=LoadCursorW(NULL,IDC_ARROW);cls.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);cls.hIcon=LoadIconW(NULL,IDI_APPLICATION);RegisterClassW(&cls);
     RECT rect={0,0,px(780),px(784)};AdjustWindowRect(&rect,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,FALSE);
-    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.4.1 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
+    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.5 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
     if(!window)return 1;
     tray.cbSize=sizeof(tray);tray.hWnd=window;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=cls.hIcon;wcscpy(tray.szTip,L"TCL Display — управление из Home Assistant");
     taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");tray_apply();

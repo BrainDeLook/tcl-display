@@ -26,6 +26,9 @@
     "switch": {
       "pc_display": {
         "name": "Дисплей Windows"
+      },
+      "make_primary": {
+        "name": "Делать ТВ основным"
       }
     }
   }

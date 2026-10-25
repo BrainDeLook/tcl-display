@@ -37,3 +37,19 @@ jobs:
         with:
           category: integration
           ignore: brands
+
+  native:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Zig 0.13.0
+        shell: pwsh
+        run: |
+          Invoke-WebRequest https://ziglang.org/download/0.13.0/zig-windows-x86_64-0.13.0.zip -OutFile zig.zip
+          Expand-Archive zig.zip -DestinationPath zig
+      - name: Native display regression tests and application build
+        shell: pwsh
+        run: |
+          $zig = "$PWD/zig/zig-windows-x86_64-0.13.0/zig.exe"
+          ./windows/test.ps1 -Zig $zig
+          ./windows/build.ps1 -Zig $zig -OutputDirectory "$PWD/dist"

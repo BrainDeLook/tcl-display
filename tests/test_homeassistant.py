@@ -27,10 +27,10 @@ async def prepared(hass):
         patch("custom_components.tcl_display.api.AgentClient.status", new_callable=AsyncMock) as status,
         patch("custom_components.tcl_display.api.AgentClient.set_enabled", new_callable=AsyncMock) as command,
     ):
-        status.return_value = {"ok": True, "enabled": False, "available": True}
+        status.return_value = {"ok": True, "enabled": False, "available": True, "make_primary": False}
 
         async def result(enabled):
-            return {"ok": True, "enabled": enabled, "available": True}
+            return {"ok": True, "enabled": enabled, "available": True, "make_primary": False}
 
         command.side_effect = result
         yield status, command
@@ -44,9 +44,8 @@ async def setup_entry(hass):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 1
-    assert entities[0].domain == "switch"
-    return entry, entities[0].entity_id
+    assert len(entities) == 2
+    return entry, next(e.entity_id for e in entities if e.unique_id.endswith("_pc_display"))
 
 
 async def test_single_step_pairing(hass, prepared):
@@ -56,7 +55,7 @@ async def test_single_step_pairing(hass, prepared):
     assert result["data"] == DATA
     await hass.async_block_till_done()
     entities = er.async_entries_for_config_entry(er.async_get(hass), result["result"].entry_id)
-    assert len(entities) == 1 and entities[0].domain == "switch"
+    assert len(entities) == 2 and all(e.domain == "switch" for e in entities)
     prepared[1].assert_not_awaited()
 
 
@@ -161,6 +160,34 @@ async def test_v1_migration_only_removes_own_obsolete_entities(hass, prepared):
     await hass.async_block_till_done()
     assert entry.version == 2 and dict(entry.data) == DATA and not entry.options
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
-    assert [e.entity_id for e in entities] == [switch]
+    assert len(entities) == 2 and switch in [e.entity_id for e in entities]
     assert registry.async_get(unrelated.entity_id) is not None
     prepared[1].assert_not_awaited()
+
+
+async def test_primary_mode_is_independent_and_has_no_display_command(hass, prepared):
+    entry, display = await setup_entry(hass)
+    registry = er.async_get(hass)
+    mode = registry.async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_make_primary")
+    assert hass.states.get(mode).state == "off"
+    with patch(
+        "custom_components.tcl_display.api.AgentClient.set_primary_mode", new_callable=AsyncMock
+    ) as set_mode:
+        set_mode.return_value = {"ok": True, "enabled": False, "available": True, "make_primary": True}
+        await hass.services.async_call("switch", "turn_on", {"entity_id": mode}, blocking=True)
+        await hass.async_block_till_done()
+        assert hass.states.get(mode).state == "on"
+        assert hass.states.get(display).state == "off"
+        set_mode.assert_awaited_once_with(True)
+        prepared[1].assert_not_awaited()
+        set_mode.return_value["make_primary"] = False
+        await hass.services.async_call("switch", "turn_off", {"entity_id": mode}, blocking=True)
+        set_mode.assert_awaited_with(False)
+
+
+async def test_older_agent_only_disables_new_mode_switch(hass, prepared):
+    prepared[0].return_value = {"ok": True, "enabled": False, "available": True}
+    entry, display = await setup_entry(hass)
+    mode = er.async_get(hass).async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_make_primary")
+    assert hass.states.get(display).state == "off"
+    assert hass.states.get(mode).state == "unavailable"

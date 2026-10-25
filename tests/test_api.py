@@ -125,3 +125,27 @@ async def test_chunked_response_is_read_completely():
 
     async with server(handler) as client:
         assert (await client.status())["enabled"] is False
+
+
+async def test_primary_preference_uses_separate_authenticated_endpoints():
+    calls = []
+
+    async def handler(request):
+        calls.append((request.method, request.path, request.headers.get("X-TCL-Key")))
+        return web.json_response(
+            {"ok": True, "enabled": False, "available": True, "make_primary": request.path == "/primary/on"}
+        )
+
+    async with server(handler) as client:
+        assert (await client.set_primary_mode(True))["make_primary"] is True
+        assert (await client.set_primary_mode(False))["make_primary"] is False
+    assert calls == [("POST", "/primary/on", KEY), ("POST", "/primary/off", KEY)]
+
+
+async def test_primary_preference_must_be_confirmed():
+    async def handler(request):
+        return web.json_response({"ok": True, "enabled": False, "available": True})
+
+    async with server(handler) as client:
+        with pytest.raises(api.AgentError, match="primary_mode_not_confirmed"):
+            await client.set_primary_mode(True)

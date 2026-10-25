@@ -82,6 +82,56 @@ static LONG get_state(int *enabled, int *available) {
     release(&s);
     return e;
 }
+/* Primary is the source at (0,0). Translate the desktop as one unit. */
+static DISPLAYCONFIG_SOURCE_MODE *source_mode(Snapshot *s, DISPLAYCONFIG_PATH_INFO *p) {
+    UINT32 i = p->sourceInfo.modeInfoIdx;
+    if (i >= s->nm || s->modes[i].infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) return NULL;
+    return &s->modes[i].sourceMode;
+}
+static int path_named(DISPLAYCONFIG_PATH_INFO *p, const WCHAR *wanted) {
+    DISPLAYCONFIG_TARGET_DEVICE_NAME n;
+    return wanted[0] && name_of(p, &n) && !_wcsicmp(n.monitorDevicePath, wanted);
+}
+static void primary_name(Snapshot *s, WCHAR *name) {
+    name[0] = 0;
+    for (UINT32 i = 0; i < s->np; i++) {
+        DISPLAYCONFIG_PATH_INFO *p = &s->paths[i];
+        DISPLAYCONFIG_SOURCE_MODE *m = source_mode(s, p);
+        DISPLAYCONFIG_TARGET_DEVICE_NAME n;
+        if ((p->flags & DISPLAYCONFIG_PATH_ACTIVE) && m && !m->position.x && !m->position.y && name_of(p, &n)) {
+            wcscpy(name, n.monitorDevicePath); return;
+        }
+    }
+}
+static int primary_mode_enabled(void) {
+    return GetPrivateProfileIntW(L"display", L"make_primary", 0, ini) != 0;
+}
+static void saved_primary(WCHAR *name) {
+    WCHAR owner[1024];
+    GetPrivateProfileStringW(L"display_state", L"target", L"", owner, 1024, ini);
+    name[0] = 0;
+    if (!_wcsicmp(owner, selected))
+        GetPrivateProfileStringW(L"display_state", L"previous_primary", L"", name, 1024, ini);
+}
+static LONG storage_error(void) {
+    LONG e = GetLastError(); last_error = "primary_state_save_failed";
+    return e ? e : ERROR_WRITE_FAULT;
+}
+static LONG set_origin(Snapshot *s, DISPLAYCONFIG_PATH_INFO *paths, UINT32 count, UINT32 primary) {
+    DISPLAYCONFIG_SOURCE_MODE *origin = source_mode(s, &paths[primary]);
+    if (!origin) return ERROR_INVALID_DATA;
+    LONG x = origin->position.x, y = origin->position.y;
+    /* Visit modes rather than paths: clone paths can share one source. */
+    for (UINT32 m = 0; m < s->nm; m++) {
+        if (s->modes[m].infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE) continue;
+        for (UINT32 p = 0; p < count; p++) if (paths[p].sourceInfo.modeInfoIdx == m) {
+            s->modes[m].sourceMode.position.x -= x;
+            s->modes[m].sourceMode.position.y -= y;
+            break;
+        }
+    }
+    return 0;
+}
 static LONG change_display(int enable) {
     Snapshot s = {0};
     DISPLAYCONFIG_PATH_INFO *active = NULL;
@@ -91,6 +141,10 @@ static LONG change_display(int enable) {
     if (!active) { release(&s); return ERROR_NOT_ENOUGH_MEMORY; }
     UINT32 count = 0;
     int found = 0;
+    int make_primary = primary_mode_enabled();
+    WCHAR previous[1024], current[1024], expected[1024] = L"";
+    saved_primary(previous);
+    primary_name(&s, current);
     LONG right = 0;
     for (UINT32 i = 0; i < s.np; i++) {
         DISPLAYCONFIG_PATH_INFO p = s.paths[i];
@@ -104,9 +158,10 @@ static LONG change_display(int enable) {
             if (edge > right) right = edge;
         }
     }
-    if ((enable && found) || (!enable && !found)) { e = 0; goto done; }
+    if ((enable && found && (!make_primary || !_wcsicmp(current, selected))) ||
+        (!enable && !found && !previous[0])) { e = 0; goto done; }
     if (!enable && count == 0) { last_error = "refuse_last_display"; e = ERROR_ACCESS_DENIED; goto done; }
-    if (enable) {
+    if (enable && !found) {
         int candidate = -1;
         for (UINT32 i = 0; i < s.np; i++) {
             if (s.paths[i].targetInfo.targetAvailable && is_selected(&s.paths[i]) &&
@@ -146,10 +201,32 @@ static LONG change_display(int enable) {
         }
         active[count++] = p;
     }
+    if ((enable && make_primary) || (!enable && (previous[0] || !_wcsicmp(current, selected)))) {
+        int primary = -1;
+        const WCHAR *wanted = enable ? selected : previous;
+        for (UINT32 i = 0; i < count; i++) if (path_named(&active[i], wanted)) { primary = (int)i; break; }
+        /* If the old primary was unplugged, retain a working remaining screen. */
+        if (primary < 0 && !enable) {
+            for (UINT32 i = 0; i < count; i++) if (path_named(&active[i], current)) { primary = (int)i; break; }
+            if (primary < 0 && count) primary = 0;
+        }
+        if (primary < 0) { e = ERROR_NOT_FOUND; last_error = "primary_not_found"; goto done; }
+        e = set_origin(&s, active, count, (UINT32)primary);
+        if (e) { last_error = "primary_source_mode_missing"; goto done; }
+        DISPLAYCONFIG_TARGET_DEVICE_NAME n;
+        if (name_of(&active[primary], &n)) wcscpy(expected, n.monitorDevicePath);
+    }
     UINT32 flags = SDC_USE_SUPPLIED_DISPLAY_CONFIG;
     if (enable) flags |= SDC_ALLOW_CHANGES;
     e = SetDisplayConfig(count, active, s.nm, s.modes, flags | SDC_VALIDATE);
     if (e) { last_error = "validation_failed"; goto done; }
+    /* Save before applying so a restart while TV is primary cannot lose the original. */
+    if (enable && make_primary && current[0] && _wcsicmp(current, selected)) {
+        if (!WritePrivateProfileStringW(L"display_state", L"previous_primary", current, ini) ||
+            !WritePrivateProfileStringW(L"display_state", L"target", selected, ini)) {
+            e = storage_error(); goto done;
+        }
+    }
     e = SetDisplayConfig(count, active, s.nm, s.modes, flags | SDC_APPLY | SDC_SAVE_TO_DATABASE);
     if (e) { last_error = "apply_failed"; goto done; }
     /* Never report success merely because SetDisplayConfig returned zero. */
@@ -158,6 +235,17 @@ static LONG change_display(int enable) {
         e = get_state(&enabled, &available);
         if (!e && enabled != enable) { e = ERROR_GEN_FAILURE; last_error = "verification_failed"; }
     }
+    if (!e && expected[0]) {
+        Snapshot check = {0}; WCHAR actual[1024];
+        e = query(&check);
+        if (!e) {
+            primary_name(&check, actual);
+            if (_wcsicmp(actual, expected)) { e = ERROR_GEN_FAILURE; last_error = "primary_verification_failed"; }
+        }
+        release(&check);
+    }
+    if (!e && !enable && previous[0] && !WritePrivateProfileStringW(L"display_state", NULL, NULL, ini))
+        e = storage_error();
 done:
     if (!e) last_error = "none";
     HeapFree(GetProcessHeap(), 0, active);
@@ -283,15 +371,19 @@ static void handle(SOCKET client) {
     char method[16], path[128], version[16];
     if (sscanf(request, "%15s %127s %15s", method, path, version) != 3) { reply(client, 400, "{\"error\":\"bad_request\"}"); return; }
     int cmd = !strcmp(path, "/on") ? 1 : !strcmp(path, "/off") ? 0 : -1;
-    if (cmd >= 0 && strcmp(method, "POST")) { reply(client, 405, "{\"error\":\"use_post\"}"); return; }
-    if (cmd < 0 && (strcmp(path, "/status") || strcmp(method, "GET"))) { reply(client, 404, "{\"error\":\"not_found\"}"); return; }
+    int preference = !strcmp(path, "/primary/on") ? 1 : !strcmp(path, "/primary/off") ? 0 : -1;
+    if ((cmd >= 0 || preference >= 0) && strcmp(method, "POST")) { reply(client, 405, "{\"error\":\"use_post\"}"); return; }
+    if (cmd < 0 && preference < 0 && (strcmp(path, "/status") || strcmp(method, "GET"))) { reply(client, 404, "{\"error\":\"not_found\"}"); return; }
     if (dry) { reply(client, 200, "{\"ok\":true,\"dry_run\":true,\"display_changed\":false}"); return; }
-    LONG e = cmd >= 0 ? change_display(cmd) : 0;
+    LONG e = 0;
+    if (preference >= 0 && !WritePrivateProfileStringW(L"display", L"make_primary", preference ? L"1" : L"0", ini))
+        e = storage_error();
+    if (!e && cmd >= 0) e = change_display(cmd);
     int enabled = 0, available = 0;
     if (!e) e = get_state(&enabled, &available);
     char body[512];
-    snprintf(body, sizeof(body), "{\"ok\":%s,\"enabled\":%s,\"available\":%s,\"win32_error\":%ld,\"detail\":\"%s\"}",
-        e ? "false" : "true", enabled ? "true" : "false", available ? "true" : "false", e, e ? last_error : "none");
+    snprintf(body, sizeof(body), "{\"ok\":%s,\"enabled\":%s,\"available\":%s,\"make_primary\":%s,\"win32_error\":%ld,\"detail\":\"%s\"}",
+        e ? "false" : "true", enabled ? "true" : "false", available ? "true" : "false", primary_mode_enabled() ? "true" : "false", e, e ? last_error : "none");
     reply(client, e ? 503 : 200, body);
 }
 static int serve(void) {

@@ -88,6 +88,7 @@ class AgentClient:
                     or result.get("dry_run")
                     or not isinstance(result.get("enabled"), bool)
                     or not isinstance(result.get("available"), bool)
+                    or ("make_primary" in result and not isinstance(result["make_primary"], bool))
                 ):
                     raise AgentError("invalid_response")
                 return result
@@ -101,4 +102,10 @@ class AgentClient:
         result = await self.request("/on" if enabled else "/off", "POST")
         if result["enabled"] is not enabled:
             raise AgentError("change_not_confirmed")
+        return result
+
+    async def set_primary_mode(self, enabled: bool):
+        result = await self.request("/primary/on" if enabled else "/primary/off", "POST")
+        if result.get("make_primary") is not enabled:
+            raise AgentError("primary_mode_not_confirmed")
         return result
