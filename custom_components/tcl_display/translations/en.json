@@ -1,0 +1,96 @@
+{
+  "title": "TCL Display",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Windows",
+        "description": "In the Windows app, open Home Assistant setup and copy the connection code. Paste it below. The listener must be running.",
+        "data": {
+          "connection": "Connection code",
+          "name": "Device name"
+        }
+      },
+      "television": {
+        "title": "TV and volume",
+        "description": "Select the TCL entity provided by Android Debug Bridge. Power and input are read from the TV. No helpers or YAML are needed.",
+        "data": {
+          "tv_entity": "TCL TV (Android Debug Bridge)",
+          "volume_entity": "JBL / other number volume entity (optional)",
+          "auto_sync": "Automatically connect the PC display on HDMI 3"
+        }
+      },
+      "sources": {
+        "title": "TV sources",
+        "description": "Choose existing input scripts. HDMI 3 is this PC. Other inputs are optional.",
+        "data": {
+          "hdmi1_name": "HDMI 1 name",
+          "hdmi1_script": "HDMI 1 script",
+          "hdmi2_name": "HDMI 2 name",
+          "hdmi2_script": "HDMI 2 script",
+          "native_name": "Google TV name",
+          "native_script": "Google TV script",
+          "hdmi3_name": "HDMI 3 / PC name",
+          "hdmi3_script": "HDMI 3 / PC script"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the Windows app. Check the address, listener and firewall.",
+      "invalid_auth": "Invalid key. Copy the connection code from the Windows app.",
+      "invalid_connection_code": "Paste the tcl-display:// connection code from the Windows app.",
+      "invalid_tv": "Select the existing physical TV, not a virtual TCL Display player.",
+      "duplicate_source_names": "Source names must be non-empty and unique."
+    },
+    "abort": {
+      "already_configured": "This PC is already configured.",
+      "reconfigure_successful": "Connection updated.",
+      "reauth_successful": "Credentials updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "TV and volume",
+        "description": "Select the TCL entity provided by Android Debug Bridge. Power and input are read from the TV. No helpers or YAML are needed.",
+        "data": {
+          "tv_entity": "TCL TV (Android Debug Bridge)",
+          "volume_entity": "JBL / other number volume entity (optional)",
+          "auto_sync": "Automatically connect the PC display on HDMI 3"
+        }
+      },
+      "sources": {
+        "title": "TV sources",
+        "description": "Choose existing input scripts. HDMI 3 is this PC. Other inputs are optional.",
+        "data": {
+          "hdmi1_name": "HDMI 1 name",
+          "hdmi1_script": "HDMI 1 script",
+          "hdmi2_name": "HDMI 2 name",
+          "hdmi2_script": "HDMI 2 script",
+          "native_name": "Google TV name",
+          "native_script": "Google TV script",
+          "hdmi3_name": "HDMI 3 / PC name",
+          "hdmi3_script": "HDMI 3 / PC script"
+        }
+      }
+    },
+    "error": {
+      "invalid_tv": "Select the existing physical TV, not a virtual TCL Display player.",
+      "duplicate_source_names": "Source names must be non-empty and unique."
+    }
+  },
+  "entity": {
+    "switch": {
+      "pc_display": {
+        "name": "PC display"
+      },
+      "auto_sync": {
+        "name": "Automatic synchronization"
+      }
+    },
+    "binary_sensor": {
+      "agent_connection": {
+        "name": "Windows connection"
+      }
+    }
+  }
+}

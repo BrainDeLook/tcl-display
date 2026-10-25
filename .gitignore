@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+agent.ini
+home-assistant.generated.yaml
+connection.txt
+verification.txt
+*.res
+*.exe
+*.zip
+*.pdb

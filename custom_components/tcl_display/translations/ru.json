@@ -1,0 +1,96 @@
+{
+  "title": "TCL Display",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение Windows",
+        "description": "Открой приложение TCL Display на ПК → «Настройка HA» → «Копировать строку». Вставь строку ниже. Обработчик должен быть запущен.",
+        "data": {
+          "connection": "Строка подключения",
+          "name": "Имя устройства"
+        }
+      },
+      "television": {
+        "title": "Телевизор и громкость",
+        "description": "Нужна сущность TCL из Android Debug Bridge. Состояние и вход будут читаться непосредственно с ТВ. Отдельные помощники и YAML не нужны.",
+        "data": {
+          "tv_entity": "Телевизор TCL (Android Debug Bridge)",
+          "volume_entity": "Громкость JBL / другая сущность number (необязательно)",
+          "auto_sync": "Автоматически подключать дисплей ПК на HDMI 3"
+        }
+      },
+      "sources": {
+        "title": "Источники телевизора",
+        "description": "Выбери готовые скрипты переключения. HDMI 3 — вход этого ПК. Другие источники можно пропустить.",
+        "data": {
+          "hdmi1_name": "Название: HDMI 1",
+          "hdmi1_script": "Скрипт: HDMI 1",
+          "hdmi2_name": "Название: HDMI 2",
+          "hdmi2_script": "Скрипт: HDMI 2",
+          "native_name": "Название: Google TV",
+          "native_script": "Скрипт: Google TV",
+          "hdmi3_name": "Название: HDMI 3 / PC",
+          "hdmi3_script": "Скрипт: HDMI 3 / PC"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Нет связи с приложением Windows. Проверь адрес, обработчик и доступ брандмауэра.",
+      "invalid_auth": "Неверный ключ. Скопируй новую строку подключения из приложения.",
+      "invalid_connection_code": "Вставь строку tcl-display://… со вкладки «Настройка HA» приложения Windows.",
+      "invalid_tv": "Выбери существующую сущность самого телевизора, а не виртуальный плеер TCL Display.",
+      "duplicate_source_names": "Названия источников должны быть непустыми и различаться."
+    },
+    "abort": {
+      "already_configured": "Этот ПК уже настроен.",
+      "reconfigure_successful": "Подключение обновлено.",
+      "reauth_successful": "Ключ обновлён."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Телевизор и громкость",
+        "description": "Нужна сущность TCL из Android Debug Bridge. Состояние и вход будут читаться непосредственно с ТВ. Отдельные помощники и YAML не нужны.",
+        "data": {
+          "tv_entity": "Телевизор TCL (Android Debug Bridge)",
+          "volume_entity": "Громкость JBL / другая сущность number (необязательно)",
+          "auto_sync": "Автоматически подключать дисплей ПК на HDMI 3"
+        }
+      },
+      "sources": {
+        "title": "Источники телевизора",
+        "description": "Выбери готовые скрипты переключения. HDMI 3 — вход этого ПК. Другие источники можно пропустить.",
+        "data": {
+          "hdmi1_name": "Название: HDMI 1",
+          "hdmi1_script": "Скрипт: HDMI 1",
+          "hdmi2_name": "Название: HDMI 2",
+          "hdmi2_script": "Скрипт: HDMI 2",
+          "native_name": "Название: Google TV",
+          "native_script": "Скрипт: Google TV",
+          "hdmi3_name": "Название: HDMI 3 / PC",
+          "hdmi3_script": "Скрипт: HDMI 3 / PC"
+        }
+      }
+    },
+    "error": {
+      "invalid_tv": "Выбери существующую сущность самого телевизора, а не виртуальный плеер TCL Display.",
+      "duplicate_source_names": "Названия источников должны быть непустыми и различаться."
+    }
+  },
+  "entity": {
+    "switch": {
+      "pc_display": {
+        "name": "Дисплей ПК на TCL"
+      },
+      "auto_sync": {
+        "name": "Автоматическая синхронизация"
+      }
+    },
+    "binary_sensor": {
+      "agent_connection": {
+        "name": "Связь с Windows"
+      }
+    }
+  }
+}
