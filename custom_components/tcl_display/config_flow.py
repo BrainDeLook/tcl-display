@@ -17,7 +17,12 @@ def tv_schema(hass, defaults):
             selector.EntitySelectorConfig(domain="media_player")
         ),
         vol.Optional(
-            VOLUME_ENTITY, **({"default": defaults[VOLUME_ENTITY]} if defaults.get(VOLUME_ENTITY) else {})
+            VOLUME_ENTITY,
+            **(
+                {"description": {"suggested_value": defaults[VOLUME_ENTITY]}}
+                if defaults.get(VOLUME_ENTITY)
+                else {}
+            ),
         ): selector.EntitySelector(selector.EntitySelectorConfig(domain="number")),
         vol.Required(AUTO_SYNC, default=defaults.get(AUTO_SYNC, True)): bool,
     }
@@ -38,7 +43,12 @@ def source_schema(hass, defaults):
         if not value and hass.states.get(guesses[key]):
             value = guesses[key]
         marker = vol.Required if key == "hdmi3" else vol.Optional
-        schema[marker(f"{key}_script", **({"default": value} if value else {}))] = selector.EntitySelector(
+        preset = (
+            ({"default": value} if key == "hdmi3" else {"description": {"suggested_value": value}})
+            if value
+            else {}
+        )
+        schema[marker(f"{key}_script", **preset)] = selector.EntitySelector(
             selector.EntitySelectorConfig(domain="script")
         )
     return vol.Schema(schema)

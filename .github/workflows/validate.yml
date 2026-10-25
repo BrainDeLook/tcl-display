@@ -3,7 +3,7 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
-  tests:
+  protocol:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,9 +11,19 @@ jobs:
         with:
           python-version: '3.14'
       - uses: astral-sh/setup-uv@v6
-      - run: uv pip install --system pytest-homeassistant-custom-component ruff
+      - run: uv pip install --system pytest pytest-asyncio aiohttp ruff
       - run: ruff check .
-      - run: pytest -q
+      - run: pytest -q tests/test_api.py tests/test_parser.py
+  homeassistant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - uses: astral-sh/setup-uv@v6
+      - run: uv pip install --system pytest-homeassistant-custom-component
+      - run: pytest -q tests/test_homeassistant.py
   hassfest:
     runs-on: ubuntu-latest
     steps:

@@ -168,3 +168,22 @@ async def test_reconfigure_keeps_entry_and_entity_ids(hass, prepared):
     await hass.async_block_till_done()
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
     assert er.async_get(hass).async_get(player) is not None
+
+
+async def test_options_can_remove_optional_volume_and_sources(hass, prepared):
+    entry, _, _ = await setup_entry(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["step_id"] == "init"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"tv_entity": DATA["tv_entity"], "auto_sync": False}
+    )
+    assert result["step_id"] == "sources"
+    values = {key: value for key, value in DATA.items() if key.endswith("_name")}
+    values["hdmi3_script"] = DATA["hdmi3_script"]
+    result = await hass.config_entries.options.async_configure(result["flow_id"], values)
+    assert result["type"] is data_entry_flow.FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert entry.options["volume_entity"] == ""
+    assert entry.options["hdmi1_script"] == ""
+    assert entry.options["native_script"] == ""
+    assert entry.runtime_data.config["auto_sync"] is False
