@@ -95,7 +95,7 @@ static LONG WINAPI fake_set(UINT32 np, DISPLAYCONFIG_PATH_INFO *p, UINT32 nm,
 #define main unused_console_main
 #include "../src/core.c"
 #undef main
-static int icons_saves, icons_restores, icons_error;
+static int icons_saves, icons_restores, icons_error, icons_restore_error;
 UINT32 desktop_display_scale(const WCHAR *name){(void)name;return 100;}
 HRESULT desktop_save(const WCHAR *folder, const DesktopTopology *topology) {
     (void)folder; assert(topology->count);icons_saves++;
@@ -106,13 +106,13 @@ HRESULT desktop_save(const WCHAR *folder, const DesktopTopology *topology) {
     return icons_error ? E_FAIL : S_OK;
 }
 HRESULT desktop_restore(const WCHAR *folder, const DesktopTopology *topology) {
-    (void)folder;assert(topology->count);icons_restores++;return S_OK;
+    (void)folder;assert(topology->count);icons_restores++;return icons_restore_error ? E_FAIL : S_OK;
 }
 static void primary(int id) {assert(on[id] && position[id].x==0 && position[id].y==0);}
 static void mode(int enabled) {assert(WritePrivateProfileStringW(L"display",L"make_primary",enabled?L"1":L"0",ini));}
 int main(void) {
     WCHAR temp[MAX_PATH], saved[1024];GetTempPathW(MAX_PATH,temp);assert(GetTempFileNameW(temp,L"tcl",0,ini));
-    wcscpy(selected,L"test-tv");
+    wcscpy(selected,L"test-tv");wcscpy(data_folder,temp);
     /* Capture real user mode, rather than the TV's EDID-preferred 4K mode. */
     on[2]=1;assert(capture_profile()==0);on[2]=0;
     DisplayProfile profile={0};assert(read_profile(&profile));
@@ -147,6 +147,11 @@ int main(void) {
     assert(WritePrivateProfileStringW(L"display",L"restore_icons",L"0",ini));
     int saved_calls=icons_saves;assert(change_display(1)==0);assert(icons_saves==saved_calls);
     assert(change_display(0)==0);assert(WritePrivateProfileStringW(L"display",L"restore_icons",L"1",ini));
+    /* A restore warning leaves the display off, keeps the snapshot pending, and supports retry. */
+    assert(change_display(1)==0);icons_restore_error=1;
+    assert(change_display(0)==0 && !on[2] && icons_pending());
+    assert(!strcmp(last_warning,"desktop_icons_restore_failed"));
+    icons_restore_error=0;assert(change_display(0)==0 && !icons_pending());
     /* An absent previous monitor must not be activated. */
     mode(1);assert(change_display(1)==0);on[1]=0;connected[1]=0;
     assert(change_display(0)==0 && !on[1] && !on[2]);primary(0);
