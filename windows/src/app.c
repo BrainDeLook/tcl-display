@@ -33,6 +33,7 @@
 #define ID_SAVE_BEHAVIOR 125
 #define ID_QUIT_BUTTON 126
 #define ID_PRIMARY_MODE 127
+#define ID_CAPTURE_MODE 128
 #ifdef TCL_TEST_BUILD
 #define APP_MUTEX_NAME L"Local\\TCLDisplayAppBehaviorTest"
 #define APP_CLASS_NAME L"TCLDisplayAppBehaviorTestWindow"
@@ -289,7 +290,11 @@ static void toggle_display(int enable) {
     SetCursor(LoadCursorW(NULL, IDC_WAIT));
     EnterCriticalSection(&display_lock); LONG e = change_display(enable); LeaveCriticalSection(&display_lock);
     SetCursor(LoadCursorW(NULL, IDC_ARROW));
-    if (e) error_code(enable ? L"Не удалось подключить TCL. Выбери HDMI 3 на ТВ и повтори." : L"Не удалось отключить TCL.", e);
+    if (e) {
+        WCHAR details[512]; swprintf(details,512,L"%ls\nЭтап: %hs. Подробности в agent.log (кнопка «Открыть папку»).",
+            enable ? L"Не удалось подключить TCL." : L"Не удалось отключить TCL.",last_error);
+        error_code(details,e);
+    }
     update_display_status();
 }
 static DWORD run_netsh(WCHAR *arguments) {
@@ -360,8 +365,8 @@ static void build_ui(void) {
     control(0,L"BUTTON",L"Остановить",WS_TABSTOP,262,509,150,36,ID_STOP);
     control(0,L"BUTTON",L"Подключить TCL",WS_TABSTOP,28,566,220,36,ID_ON);
     control(0,L"BUTTON",L"Отключить TCL",WS_TABSTOP,262,566,220,36,ID_OFF);
-    control(0,L"STATIC",L"Эти две кнопки меняют конфигурацию дисплеев Windows.",0,28,614,718,24,0);
-    control(0,L"STATIC",L"Действие крестика и значок трея настраиваются на вкладке «Поведение».",0,28,646,718,24,0);
+    control(0,L"BUTTON",L"Запомнить текущий режим ТВ",WS_TABSTOP,28,614,350,34,ID_CAPTURE_MODE);
+    control(0,L"STATIC",L"Включи ТВ, выставь в Windows нужные разрешение и герцовку,\r\nзатем запомни режим. Он также сохраняется перед отключением.",0,28,660,718,48,0);
 
     control(1,L"STATIC",L"1. Установи интеграцию TCL Display через HACS и перезапусти HA.\r\n2. Сохрани настройки ПК, разреши доступ HA и запусти обработчик.\r\n3. Скопируй строку ниже в мастер добавления интеграции.\r\n    В HA появятся управление дисплеем и режим основного экрана.",0,28,148,718,90,0);
     yaml_edit=control(1,L"EDIT",L"",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|ES_AUTOHSCROLL|WS_VSCROLL|WS_HSCROLL|WS_TABSTOP,28,249,718,110,210);
@@ -451,6 +456,22 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
         case ID_SHOW: SendMessageW(key_edit,EM_SETPASSWORDCHAR,SendMessageW(GetDlgItem(hwnd,ID_SHOW),BM_GETCHECK,0,0)==BST_CHECKED?0:L'●',0); InvalidateRect(key_edit,NULL,TRUE); break;
         case ID_START: start_server(); break;
         case ID_STOP: stop_server(); break;
+        case ID_CAPTURE_MODE: {
+            if (!configured || settings_dirty) { message(L"Сначала сохрани настройки выбранного дисплея.",MB_ICONWARNING); break; }
+            EnterCriticalSection(&display_lock);
+            LONG e=capture_profile(); DisplayProfile profile={0};
+            int captured=!e && read_profile(&profile);
+            LeaveCriticalSection(&display_lock);
+            if(e)error_code(L"Включи выбранный ТВ и выставь нужный режим в Windows перед сохранением.",e);
+            else if(captured) {
+                WCHAR text[256];
+                swprintf(text,256,L"Сохранён режим %u × %u, %.3f Гц. Он будет восстановлен при следующем подключении.",
+                    profile.source.width,profile.source.height,
+                    (double)profile.target.targetVideoSignalInfo.vSyncFreq.Numerator/profile.target.targetVideoSignalInfo.vSyncFreq.Denominator);
+                message(text,MB_ICONINFORMATION);
+            }
+            break;
+        }
         case ID_ON: toggle_display(1); break;
         case ID_OFF: toggle_display(0); break;
         case ID_COPY: copy_yaml(); break;
@@ -516,7 +537,7 @@ int WINAPI WinMain(HINSTANCE inst,HINSTANCE previous,LPSTR command,int show) {
     WSADATA winsock; if(WSAStartup(MAKEWORD(2,2),&winsock)) return 1;
     WNDCLASSW cls={0};cls.lpfnWndProc=procedure;cls.hInstance=inst;cls.lpszClassName=APP_CLASS_NAME;cls.hCursor=LoadCursorW(NULL,IDC_ARROW);cls.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);cls.hIcon=LoadIconW(inst,MAKEINTRESOURCEW(101));RegisterClassW(&cls);
     RECT rect={0,0,px(780),px(784)};AdjustWindowRect(&rect,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,FALSE);
-    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.6 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
+    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.7 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
     if(!window)return 1;
     tray.cbSize=sizeof(tray);tray.hWnd=window;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=cls.hIcon;wcscpy(tray.szTip,L"TCL Display — управление из Home Assistant");
     taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");tray_apply();

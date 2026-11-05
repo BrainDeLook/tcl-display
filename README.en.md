@@ -12,7 +12,7 @@ The app uses C/Win32 with no Python/.NET runtime. Tray visibility and close-to-b
 
 ## Home Assistant
 
-1. In regular HACS, add `https://github.com/BrainDeLook/tcl-display` as a custom **Integration** repository. Install TCL Display and restart HA. Existing installations: update to 0.4.0 and restart.
+1. In regular HACS, add `https://github.com/BrainDeLook/tcl-display` as a custom **Integration** repository. Install TCL Display and restart HA. Existing installations: update to 0.5.0 and restart.
 2. Settings → Devices & services → Add integration → TCL Display. Paste the Windows connection code and optionally name the device.
 3. The device exposes **Windows display** and a configuration switch, **Make TV primary** (off by default). Use its actual entity ID with `switch.turn_on` / `switch.turn_off` in your existing scripts or automations.
 
@@ -28,10 +28,16 @@ Enable the separate **Make TV primary** configuration switch. It stores a prefer
 
 The previous monitor is saved in `agent.ini` before applying changes and survives app/Windows restarts. Repeated on commands do not overwrite it with the TV. If the old monitor is unplugged, a remaining active monitor becomes primary. Disabling the preference while the TV is primary still preserves the pending restoration on display-off. Restoration requires an off command through the app/HA; unplugging the cable alone does not trigger it.
 
-The preference is also available in the Windows app's Behavior tab and saves immediately. Update the Windows app to 1.6; older agents keep their display control but cannot expose the new preference. No re-pairing is required. Primary switching translates desktop coordinates as described in [Microsoft's source-mode documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_source_mode).
+The preference is also available in the Windows app's Behavior tab and saves immediately. Update the Windows app to 1.7; older agents keep their display control but cannot expose the new preference. No re-pairing is required. Primary switching translates desktop coordinates as described in [Microsoft's source-mode documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_source_mode).
 
 ## Development
 
 HA code: `custom_components/tcl_display`. Native app: `windows/src`; build with `windows/build.ps1` and Zig 0.13. CI runs protocol tests, real Home Assistant integration tests, hassfest and HACS validation.
 
 Native regression tests: `windows/test.ps1 -Zig <path-to-zig.exe>`; synthetic topology, no physical display changes.
+
+## Saved display mode (Windows 1.7)
+
+Enable the TV, set your desired resolution/refresh rate in Windows, then click **Запомнить текущий режим ТВ** (Capture current TV mode). The app saves exact source and target timing parameters, also capturing the current mode before a display-off command. Reconnection uses the saved profile without SDC_ALLOW_CHANGES: an unsupported mode is an error, not a silent fallback to 4K60. Before the first capture, EDID preferred mode is used. Profiles are bound to the selected display and stored in agent.ini. HDR/depth are not separately saved.
+
+On commands wait up to 3.5 seconds for HDMI discovery; confirmation polls for up to 3 seconds without reapplying a topology. Command timeout is 30 seconds. Turn on the TV and select PC HDMI first; allow a longer delay in your automation if the TV needs longer to become ready. HA errors preserve safe Windows code/stage details, and agent.log stores bounded local diagnostics without credentials.

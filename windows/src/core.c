@@ -133,7 +133,72 @@ static LONG set_origin(Snapshot *s, DISPLAYCONFIG_PATH_INFO *paths, UINT32 count
     }
     return 0;
 }
-static LONG change_display(int enable) {
+/* Local, versioned profile; source/target ids are rebound to the current path. */
+typedef struct {
+    UINT32 version;
+    DISPLAYCONFIG_SOURCE_MODE source;
+    DISPLAYCONFIG_TARGET_MODE target;
+    DISPLAYCONFIG_ROTATION rotation;
+    DISPLAYCONFIG_SCALING scaling;
+} DisplayProfile;
+static int read_profile(DisplayProfile *profile) {
+    WCHAR owner[1024];
+    GetPrivateProfileStringW(L"display_profile", L"target", L"", owner, 1024, ini);
+    return !_wcsicmp(owner, selected) &&
+        GetPrivateProfileStructW(L"display_profile", L"mode_v1", profile, sizeof(*profile), ini) &&
+        profile->version == 1 && profile->source.width && profile->source.height &&
+        profile->target.targetVideoSignalInfo.vSyncFreq.Numerator &&
+        profile->target.targetVideoSignalInfo.vSyncFreq.Denominator;
+}
+static LONG save_profile(Snapshot *s) {
+    for (UINT32 i = 0; i < s->np; i++) {
+        DISPLAYCONFIG_PATH_INFO *p = &s->paths[i];
+        if (!(p->flags & DISPLAYCONFIG_PATH_ACTIVE) || !is_selected(p)) continue;
+        DISPLAYCONFIG_SOURCE_MODE *source = source_mode(s, p);
+        UINT32 t = p->targetInfo.modeInfoIdx;
+        if (!source || t >= s->nm || s->modes[t].infoType != DISPLAYCONFIG_MODE_INFO_TYPE_TARGET) break;
+        DisplayProfile profile = {0};
+        profile.version = 1; profile.source = *source;
+        profile.target = s->modes[t].targetMode;
+        profile.rotation = p->targetInfo.rotation; profile.scaling = p->targetInfo.scaling;
+        if (!WritePrivateProfileStructW(L"display_profile", L"mode_v1", &profile, sizeof(profile), ini) ||
+            !WritePrivateProfileStringW(L"display_profile", L"target", selected, ini)) {
+            last_error = "display_profile_save_failed"; return ERROR_WRITE_FAULT;
+        }
+        return 0;
+    }
+    last_error = "display_profile_requires_active_screen";
+    return ERROR_NOT_FOUND;
+}
+static LONG capture_profile(void) {
+    Snapshot s = {0};
+    LONG e = query(&s);
+    if (!e) e = save_profile(&s);
+    else last_error = "query_failed";
+    release(&s); return e;
+}
+static int profile_matches(Snapshot *s, DISPLAYCONFIG_PATH_INFO *p, DisplayProfile *profile) {
+    DISPLAYCONFIG_SOURCE_MODE *m = source_mode(s, p);
+    UINT32 t = p->targetInfo.modeInfoIdx;
+    if (!m || t >= s->nm || s->modes[t].infoType != DISPLAYCONFIG_MODE_INFO_TYPE_TARGET) return 0;
+    DISPLAYCONFIG_RATIONAL a = s->modes[t].targetMode.targetVideoSignalInfo.vSyncFreq;
+    DISPLAYCONFIG_RATIONAL b = profile->target.targetVideoSignalInfo.vSyncFreq;
+    return m->width == profile->source.width && m->height == profile->source.height &&
+        (UINT64)a.Numerator * b.Denominator == (UINT64)b.Numerator * a.Denominator;
+}
+static void log_display_result(int enable, LONG error, int attempts) {
+    WCHAR path[MAX_PATH]; swprintf(path, MAX_PATH, L"%ls\\agent.log", data_folder);
+    FILE *f = _wfopen(path, L"ab");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    if (ftell(f) > 65536) { fclose(f); f = _wfopen(path, L"wb"); if (!f) return; }
+    SYSTEMTIME time; GetLocalTime(&time);
+    fprintf(f, "%04u-%02u-%02u %02u:%02u:%02u display=%s win32=%ld stage=%s attempts=%d\n",
+        time.wYear,time.wMonth,time.wDay,time.wHour,time.wMinute,time.wSecond,
+        enable ? "on" : "off",error,last_error,attempts);
+    fclose(f);
+}
+static LONG change_display_once(int enable) {
     Snapshot s = {0};
     DISPLAYCONFIG_PATH_INFO *active = NULL;
     LONG e = query(&s);
@@ -143,6 +208,8 @@ static LONG change_display(int enable) {
     UINT32 count = 0;
     int found = 0;
     int make_primary = primary_mode_enabled();
+    DisplayProfile profile = {0};
+    int restoring_profile = enable && read_profile(&profile);
     WCHAR previous[1024], current[1024], expected[1024] = L"";
     saved_primary(previous);
     primary_name(&s, current);
@@ -162,6 +229,10 @@ static LONG change_display(int enable) {
     if ((enable && found && (!make_primary || !_wcsicmp(current, selected))) ||
         (!enable && !found && !previous[0])) { e = 0; goto done; }
     if (!enable && count == 0) { last_error = "refuse_last_display"; e = ERROR_ACCESS_DENIED; goto done; }
+    if (!enable && found) {
+        e = save_profile(&s);
+        if (e) goto done;
+    }
     if (enable && !found) {
         int candidate = -1;
         for (UINT32 i = 0; i < s.np; i++) {
@@ -182,23 +253,39 @@ static LONG change_display(int enable) {
            0/1 is an invalid rate and causes ERROR_INVALID_PARAMETER (87). */
         p.targetInfo.refreshRate.Denominator = 0;
         p.targetInfo.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_UNSPECIFIED;
-        DISPLAYCONFIG_TARGET_PREFERRED_MODE preferred = {0};
-        preferred.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE;
-        preferred.header.size = sizeof(preferred);
-        preferred.header.adapterId = p.targetInfo.adapterId;
-        preferred.header.id = p.targetInfo.id;
-        if (DisplayConfigGetDeviceInfo(&preferred.header) == 0 && preferred.width && preferred.height) {
-            DISPLAYCONFIG_MODE_INFO m = {0};
-            m.infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
-            m.id = p.sourceInfo.id;
-            m.adapterId = p.sourceInfo.adapterId;
-            m.sourceMode.width = preferred.width;
-            m.sourceMode.height = preferred.height;
-            m.sourceMode.pixelFormat = DISPLAYCONFIG_PIXELFORMAT_32BPP;
-            m.sourceMode.position.x = right;
-            m.sourceMode.position.y = 0;
-            p.sourceInfo.modeInfoIdx = s.nm;
-            s.modes[s.nm++] = m;
+        if (restoring_profile) {
+            DISPLAYCONFIG_MODE_INFO source = {0}, target = {0};
+            source.infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
+            source.id = p.sourceInfo.id; source.adapterId = p.sourceInfo.adapterId;
+            source.sourceMode = profile.source;
+            source.sourceMode.position.x = right; source.sourceMode.position.y = 0;
+            p.sourceInfo.modeInfoIdx = s.nm; s.modes[s.nm++] = source;
+            target.infoType = DISPLAYCONFIG_MODE_INFO_TYPE_TARGET;
+            target.id = p.targetInfo.id; target.adapterId = p.targetInfo.adapterId;
+            target.targetMode = profile.target;
+            p.targetInfo.modeInfoIdx = s.nm; s.modes[s.nm++] = target;
+            p.targetInfo.rotation = profile.rotation; p.targetInfo.scaling = profile.scaling;
+            p.targetInfo.refreshRate = profile.target.targetVideoSignalInfo.vSyncFreq;
+            p.targetInfo.scanLineOrdering = profile.target.targetVideoSignalInfo.scanLineOrdering;
+        } else {
+            DISPLAYCONFIG_TARGET_PREFERRED_MODE preferred = {0};
+            preferred.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_PREFERRED_MODE;
+            preferred.header.size = sizeof(preferred);
+            preferred.header.adapterId = p.targetInfo.adapterId;
+            preferred.header.id = p.targetInfo.id;
+            if (DisplayConfigGetDeviceInfo(&preferred.header) == 0 && preferred.width && preferred.height) {
+                DISPLAYCONFIG_MODE_INFO m = {0};
+                m.infoType = DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE;
+                m.id = p.sourceInfo.id;
+                m.adapterId = p.sourceInfo.adapterId;
+                m.sourceMode.width = preferred.width;
+                m.sourceMode.height = preferred.height;
+                m.sourceMode.pixelFormat = DISPLAYCONFIG_PIXELFORMAT_32BPP;
+                m.sourceMode.position.x = right;
+                m.sourceMode.position.y = 0;
+                p.sourceInfo.modeInfoIdx = s.nm;
+                s.modes[s.nm++] = m;
+            }
         }
         active[count++] = p;
     }
@@ -218,7 +305,8 @@ static LONG change_display(int enable) {
         if (name_of(&active[primary], &n)) wcscpy(expected, n.monitorDevicePath);
     }
     UINT32 flags = SDC_USE_SUPPLIED_DISPLAY_CONFIG;
-    if (enable) flags |= SDC_ALLOW_CHANGES;
+    /* A captured mode must never silently fall back to EDID defaults. */
+    if (enable && !restoring_profile) flags |= SDC_ALLOW_CHANGES;
     e = SetDisplayConfig(count, active, s.nm, s.modes, flags | SDC_VALIDATE);
     if (e) { last_error = "validation_failed"; goto done; }
     /* Save before applying so a restart while TV is primary cannot lose the original. */
@@ -230,20 +318,29 @@ static LONG change_display(int enable) {
     }
     e = SetDisplayConfig(count, active, s.nm, s.modes, flags | SDC_APPLY | SDC_SAVE_TO_DATABASE);
     if (e) { last_error = "apply_failed"; goto done; }
-    /* Never report success merely because SetDisplayConfig returned zero. */
-    {
-        int enabled = 0, available = 0;
-        e = get_state(&enabled, &available);
-        if (!e && enabled != enable) { e = ERROR_GEN_FAILURE; last_error = "verification_failed"; }
-    }
-    if (!e && expected[0]) {
+    /* Drivers can publish the new topology asynchronously. Poll; do not reapply it. */
+    for (int attempt = 0; attempt < 13; attempt++) {
         Snapshot check = {0}; WCHAR actual[1024];
         e = query(&check);
         if (!e) {
-            primary_name(&check, actual);
-            if (_wcsicmp(actual, expected)) { e = ERROR_GEN_FAILURE; last_error = "primary_verification_failed"; }
-        }
+            int enabled = 0, matches = !restoring_profile;
+            for (UINT32 i = 0; i < check.np; i++) {
+                DISPLAYCONFIG_PATH_INFO *p = &check.paths[i];
+                if ((p->flags & DISPLAYCONFIG_PATH_ACTIVE) && is_selected(p)) {
+                    enabled = 1;
+                    if (restoring_profile) matches = profile_matches(&check, p, &profile);
+                }
+            }
+            if (enabled != enable) { e = ERROR_GEN_FAILURE; last_error = "verification_failed"; }
+            else if (enable && !matches) { e = ERROR_GEN_FAILURE; last_error = "display_mode_not_restored"; }
+            else if (expected[0]) {
+                primary_name(&check, actual);
+                if (_wcsicmp(actual, expected)) { e = ERROR_GEN_FAILURE; last_error = "primary_verification_failed"; }
+            }
+        } else last_error = "verification_query_failed";
         release(&check);
+        if (!e) break;
+        if (attempt < 12) Sleep(250);
     }
     if (!e && !enable && previous[0] && !WritePrivateProfileStringW(L"display_state", NULL, NULL, ini))
         e = storage_error();
@@ -251,6 +348,18 @@ done:
     if (!e) last_error = "none";
     HeapFree(GetProcessHeap(), 0, active);
     release(&s);
+    return e;
+}
+static LONG change_display(int enable) {
+    LONG e = 0;
+    int attempts = 0;
+    for (; attempts < 8; attempts++) {
+        e = change_display_once(enable);
+        /* Only retry discovery: no display-changing API has run at this stage. */
+        if (!enable || e != ERROR_NOT_FOUND || strcmp(last_error, "target_not_available_or_no_free_source")) break;
+        if (attempts < 7) Sleep(500);
+    }
+    log_display_result(enable, e, attempts < 8 ? attempts + 1 : 8);
     return e;
 }
 static void print_w(const WCHAR *w) {

@@ -149,3 +149,31 @@ async def test_primary_preference_must_be_confirmed():
     async with server(handler) as client:
         with pytest.raises(api.AgentError, match="primary_mode_not_confirmed"):
             await client.set_primary_mode(True)
+
+
+async def test_windows_error_survives_503_response():
+    async def handler(request):
+        return web.json_response(
+            {"ok": False, "win32_error": 1168, "detail": "target_not_available_or_no_free_source"}, status=503
+        )
+
+    async with server(handler) as client:
+        with pytest.raises(api.AgentError, match="win32=1168, stage=target_not_available_or_no_free_source"):
+            await client.set_enabled(True)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not-json",
+        {"win32_error": 31, "detail": "secret https://private"},
+        {"win32_error": "31", "detail": "apply_failed"},
+    ],
+)
+async def test_untrusted_agent_errors_are_not_reflected(payload):
+    async def handler(request):
+        return web.json_response(payload, status=503)
+
+    async with server(handler) as client:
+        with pytest.raises(api.AgentError, match="agent_request_failed"):
+            await client.set_enabled(True)

@@ -1,6 +1,5 @@
 """Small authenticated HTTP client for the native Windows agent."""
 
-import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -69,19 +68,28 @@ class AgentClient:
                 method,
                 self._base + path,
                 headers=self._headers,
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=30 if method == "POST" else 10),
                 allow_redirects=False,
             ) as response:
                 if response.status == 401:
                     raise InvalidAuth("invalid_auth")
-                if response.status != 200:
-                    raise AgentError("agent_request_failed")
+                if response.status not in {200, 503}:
+                    raise AgentError(f"agent_http_{response.status}")
                 raw = bytearray()
                 async for chunk in response.content.iter_chunked(4096):
                     raw.extend(chunk)
                     if len(raw) > 8192:
                         raise AgentError("invalid_response")
                 result = json.loads(raw)
+                if response.status == 503:
+                    if (
+                        isinstance(result, dict)
+                        and type(result.get("win32_error")) is int
+                        and isinstance(result.get("detail"), str)
+                        and re.fullmatch(r"[a-z_]{1,80}", result["detail"])
+                    ):
+                        raise AgentError(f"win32={result['win32_error']}, stage={result['detail']}")
+                    raise AgentError("agent_request_failed")
                 if (
                     not isinstance(result, dict)
                     or result.get("ok") is not True
@@ -92,7 +100,9 @@ class AgentClient:
                 ):
                     raise AgentError("invalid_response")
                 return result
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
+        except TimeoutError as err:
+            raise AgentError("agent_timeout") from err
+        except (aiohttp.ClientError, ValueError) as err:
             raise AgentError("cannot_connect") from err
 
     async def status(self):

@@ -191,3 +191,12 @@ async def test_older_agent_only_disables_new_mode_switch(hass, prepared):
     mode = er.async_get(hass).async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_make_primary")
     assert hass.states.get(display).state == "off"
     assert hass.states.get(mode).state == "unavailable"
+
+
+async def test_windows_failure_details_reach_service_error(hass, prepared):
+    from homeassistant.exceptions import HomeAssistantError
+
+    _, entity = await setup_entry(hass)
+    prepared[1].side_effect = AgentError("win32=1610, stage=validation_failed")
+    with pytest.raises(HomeAssistantError, match="win32=1610, stage=validation_failed"):
+        await hass.services.async_call("switch", "turn_on", {"entity_id": entity}, blocking=True)
