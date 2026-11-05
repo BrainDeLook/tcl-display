@@ -7,7 +7,7 @@ Push-Location $sourcePath
 try {
     & $Zig rc /fo app.res app.rc
     if ($LASTEXITCODE -ne 0) { throw 'Resource build failed.' }
-    & $Zig cc -Os -s -Wall -Wextra '-Wl,--subsystem,windows' -o (Join-Path $outputPath 'TCL-Display.exe') app.c app.res -luser32 -lws2_32 -lbcrypt -lcomctl32 -lshell32 -ladvapi32 -lgdi32
+    & $Zig cc -Os -s -Wall -Wextra '-Wl,--subsystem,windows' -o (Join-Path $outputPath 'TCL-Display.exe') app.c desktop.c app.res -luser32 -lws2_32 -lbcrypt -lcomctl32 -lshell32 -ladvapi32 -lgdi32 -lole32 -loleaut32 -luuid -lshlwapi -lshcore
     if ($LASTEXITCODE -ne 0) { throw 'Application build failed.' }
 } finally { Pop-Location }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'НАСТРОЙКА-HA.txt') -Destination $outputPath -Force

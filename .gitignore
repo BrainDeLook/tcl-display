@@ -11,3 +11,7 @@ verification.txt
 *.exe
 *.zip
 *.pdb
+
+desktop-icons.bin
+desktop-icons.tmp
+agent.log

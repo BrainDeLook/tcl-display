@@ -6,3 +6,9 @@ $testExe = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'display_test.ex
 if ($LASTEXITCODE -ne 0) { throw 'Native test compilation failed.' }
 & $testExe
 if ($LASTEXITCODE -ne 0) { throw 'Native tests failed.' }
+
+$desktopTest = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) 'desktop_test.exe'
+& $Zig cc -Os -Wall -Wextra -o $desktopTest (Join-Path $PSScriptRoot 'tests/desktop_test.c') -luser32 -lshell32 -lole32 -loleaut32 -luuid -lshlwapi -lshcore
+if ($LASTEXITCODE -ne 0) { throw 'Desktop test compilation failed.' }
+& $desktopTest
+if ($LASTEXITCODE -ne 0) { throw 'Desktop tests failed.' }

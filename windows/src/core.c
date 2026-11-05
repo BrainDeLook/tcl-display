@@ -14,12 +14,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include "desktop.h"
 
 /* Native Windows display receiver. No arbitrary command execution. */
 static WCHAR folder[MAX_PATH], data_folder[MAX_PATH], ini[MAX_PATH], selected[1024];
 static char secret[65];
 static int port = 8766, dry = 0;
-static const char *last_error = "none";
+static const char *last_error = "none", *last_warning = "none";
 typedef struct {
     DISPLAYCONFIG_PATH_INFO *paths;
     DISPLAYCONFIG_MODE_INFO *modes;
@@ -193,10 +194,37 @@ static void log_display_result(int enable, LONG error, int attempts) {
     fseek(f, 0, SEEK_END);
     if (ftell(f) > 65536) { fclose(f); f = _wfopen(path, L"wb"); if (!f) return; }
     SYSTEMTIME time; GetLocalTime(&time);
-    fprintf(f, "%04u-%02u-%02u %02u:%02u:%02u display=%s win32=%ld stage=%s attempts=%d\n",
+    fprintf(f, "%04u-%02u-%02u %02u:%02u:%02u display=%s win32=%ld stage=%s attempts=%d warning=%s\n",
         time.wYear,time.wMonth,time.wDay,time.wHour,time.wMinute,time.wSecond,
-        enable ? "on" : "off",error,last_error,attempts);
+        enable ? "on" : "off",error,last_error,attempts,last_warning);
     fclose(f);
+}
+static LONG desktop_topology(Snapshot *s, DesktopTopology *topology) {
+    ZeroMemory(topology, sizeof(*topology)); topology->dpi = GetDpiForSystem();
+    for (UINT32 i = 0; i < s->np; i++) {
+        DISPLAYCONFIG_PATH_INFO *p = &s->paths[i];
+        if (!(p->flags & DISPLAYCONFIG_PATH_ACTIVE)) continue;
+        if (topology->count >= DESKTOP_MAX_DISPLAYS) return ERROR_NOT_SUPPORTED;
+        DISPLAYCONFIG_SOURCE_MODE *source = source_mode(s, p);
+        DISPLAYCONFIG_TARGET_DEVICE_NAME name;
+        if (!source || !name_of(p, &name)) return ERROR_INVALID_DATA;
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME gdi = {0};
+        gdi.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME; gdi.header.size = sizeof(gdi);
+        gdi.header.adapterId = p->sourceInfo.adapterId; gdi.header.id = p->sourceInfo.id;
+        LONG e = DisplayConfigGetDeviceInfo(&gdi.header); if (e) return e;
+        DesktopDisplay *display = &topology->displays[topology->count++];
+        wcscpy(display->device, name.monitorDevicePath);
+        display->x = source->position.x; display->y = source->position.y;
+        display->width = source->width; display->height = source->height;
+        display->scale = desktop_display_scale(gdi.viewGdiDeviceName);
+        if (!display->scale) return ERROR_INVALID_DATA;
+    }
+    return topology->count ? 0 : ERROR_NOT_FOUND;
+}
+static int icons_pending(void) {
+    WCHAR owner[1024];
+    GetPrivateProfileStringW(L"desktop_state", L"target", L"", owner, 1024, ini);
+    return !_wcsicmp(owner, selected) && GetPrivateProfileIntW(L"desktop_state", L"pending", 0, ini);
 }
 static LONG change_display_once(int enable) {
     Snapshot s = {0};
@@ -228,6 +256,10 @@ static LONG change_display_once(int enable) {
     }
     if ((enable && found && (!make_primary || !_wcsicmp(current, selected))) ||
         (!enable && !found && !previous[0])) { e = 0; goto done; }
+    DesktopTopology before_topology;
+    int capture_icons = enable && GetPrivateProfileIntW(L"display", L"restore_icons", 1, ini) &&
+        (!found || (make_primary && current[0] && _wcsicmp(current, selected) && !icons_pending()));
+    LONG icons_topology_error = capture_icons ? desktop_topology(&s, &before_topology) : 0;
     if (!enable && count == 0) { last_error = "refuse_last_display"; e = ERROR_ACCESS_DENIED; goto done; }
     if (!enable && found) {
         e = save_profile(&s);
@@ -309,6 +341,20 @@ static LONG change_display_once(int enable) {
     if (enable && !restoring_profile) flags |= SDC_ALLOW_CHANGES;
     e = SetDisplayConfig(count, active, s.nm, s.modes, flags | SDC_VALIDATE);
     if (e) { last_error = "validation_failed"; goto done; }
+    /* Capture the current desktop before connecting a display or changing primary. */
+    if (capture_icons) {
+        HRESULT hr = icons_topology_error ? HRESULT_FROM_WIN32(icons_topology_error) : desktop_save(data_folder, &before_topology);
+        if (FAILED(hr)) {
+            e = ERROR_GEN_FAILURE;
+            last_error = hr == HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED) ?
+                "desktop_icons_auto_arrange_enabled" : "desktop_icons_capture_failed";
+            goto done;
+        }
+        if (!WritePrivateProfileStringW(L"desktop_state", L"target", selected, ini) ||
+            !WritePrivateProfileStringW(L"desktop_state", L"pending", L"1", ini)) {
+            e = storage_error(); goto done;
+        }
+    }
     /* Save before applying so a restart while TV is primary cannot lose the original. */
     if (enable && make_primary && current[0] && _wcsicmp(current, selected)) {
         if (!WritePrivateProfileStringW(L"display_state", L"previous_primary", current, ini) ||
@@ -352,12 +398,30 @@ done:
 }
 static LONG change_display(int enable) {
     LONG e = 0;
+    last_warning = "none";
     int attempts = 0;
     for (; attempts < 8; attempts++) {
         e = change_display_once(enable);
         /* Only retry discovery: no display-changing API has run at this stage. */
         if (!enable || e != ERROR_NOT_FOUND || strcmp(last_error, "target_not_available_or_no_free_source")) break;
         if (attempts < 7) Sleep(500);
+    }
+    if (!e && !enable && icons_pending()) {
+        /* Two delayed passes tolerate Explorer's asynchronous response to WM_DISPLAYCHANGE. */
+        HRESULT hr = E_FAIL;
+        for (int pass = 0; pass < 2; pass++) {
+            Sleep(pass ? 1000 : 1500);
+            Snapshot after = {0}; DesktopTopology topology;
+            LONG query_error = query(&after);
+            if (!query_error) query_error = desktop_topology(&after, &topology);
+            hr = query_error ? HRESULT_FROM_WIN32(query_error) : desktop_restore(data_folder, &topology);
+            release(&after);
+        }
+        if (SUCCEEDED(hr)) {
+            if (!WritePrivateProfileStringW(L"desktop_state", L"pending", L"0", ini))
+                last_warning = "desktop_icons_state_save_failed";
+        } else last_warning = hr == HRESULT_FROM_WIN32(ERROR_BAD_CONFIGURATION) ?
+            "desktop_icons_layout_changed" : "desktop_icons_restore_failed";
     }
     log_display_result(enable, e, attempts < 8 ? attempts + 1 : 8);
     return e;
@@ -506,8 +570,8 @@ static void handle(SOCKET client) {
     int enabled = 0, available = 0;
     if (!e) e = get_state(&enabled, &available);
     char body[512];
-    snprintf(body, sizeof(body), "{\"ok\":%s,\"enabled\":%s,\"available\":%s,\"make_primary\":%s,\"win32_error\":%ld,\"detail\":\"%s\"}",
-        e ? "false" : "true", enabled ? "true" : "false", available ? "true" : "false", primary_mode_enabled() ? "true" : "false", e, e ? last_error : "none");
+    snprintf(body, sizeof(body), "{\"ok\":%s,\"enabled\":%s,\"available\":%s,\"make_primary\":%s,\"win32_error\":%ld,\"detail\":\"%s\",\"warning\":\"%s\"}",
+        e ? "false" : "true", enabled ? "true" : "false", available ? "true" : "false", primary_mode_enabled() ? "true" : "false", e, e ? last_error : "none", last_warning);
     reply(client, e ? 503 : 200, body);
 }
 static int serve(void) {

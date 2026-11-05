@@ -12,7 +12,7 @@ The app uses C/Win32 with no Python/.NET runtime. Tray visibility and close-to-b
 
 ## Home Assistant
 
-1. In regular HACS, add `https://github.com/BrainDeLook/tcl-display` as a custom **Integration** repository. Install TCL Display and restart HA. Existing installations: update to 0.5.0 and restart.
+1. In regular HACS, add `https://github.com/BrainDeLook/tcl-display` as a custom **Integration** repository. Install TCL Display and restart HA. Existing installations: update to 0.6.0 and restart.
 2. Settings → Devices & services → Add integration → TCL Display. Paste the Windows connection code and optionally name the device.
 3. The device exposes **Windows display** and a configuration switch, **Make TV primary** (off by default). Use its actual entity ID with `switch.turn_on` / `switch.turn_off` in your existing scripts or automations.
 
@@ -28,7 +28,7 @@ Enable the separate **Make TV primary** configuration switch. It stores a prefer
 
 The previous monitor is saved in `agent.ini` before applying changes and survives app/Windows restarts. Repeated on commands do not overwrite it with the TV. If the old monitor is unplugged, a remaining active monitor becomes primary. Disabling the preference while the TV is primary still preserves the pending restoration on display-off. Restoration requires an off command through the app/HA; unplugging the cable alone does not trigger it.
 
-The preference is also available in the Windows app's Behavior tab and saves immediately. Update the Windows app to 1.7; older agents keep their display control but cannot expose the new preference. No re-pairing is required. Primary switching translates desktop coordinates as described in [Microsoft's source-mode documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_source_mode).
+The preference is also available in the Windows app's Behavior tab and saves immediately. Update the Windows app to 1.8; older agents keep their display control but cannot expose the new preference. No re-pairing is required. Primary switching translates desktop coordinates as described in [Microsoft's source-mode documentation](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-displayconfig_source_mode).
 
 ## Development
 
@@ -41,3 +41,11 @@ Native regression tests: `windows/test.ps1 -Zig <path-to-zig.exe>`; synthetic to
 Enable the TV, set your desired resolution/refresh rate in Windows, then click **Запомнить текущий режим ТВ** (Capture current TV mode). The app saves exact source and target timing parameters, also capturing the current mode before a display-off command. Reconnection uses the saved profile without SDC_ALLOW_CHANGES: an unsupported mode is an error, not a silent fallback to 4K60. Before the first capture, EDID preferred mode is used. Profiles are bound to the selected display and stored in agent.ini. HDR/depth are not separately saved.
 
 On commands wait up to 3.5 seconds for HDMI discovery; confirmation polls for up to 3 seconds without reapplying a topology. Command timeout is 30 seconds. Turn on the TV and select PC HDMI first; allow a longer delay in your automation if the TV needs longer to become ready. HA errors preserve safe Windows code/stage details, and agent.log stores bounded local diagnostics without credentials.
+
+## Current desktop icon layout (Windows 1.8)
+
+The Behavior tab's **Сохранять и возвращать расположение значков** checkbox is enabled by default. Immediately before each new TV connection, capture current file/folder/shortcut icon positions on all active monitors. Repeated on commands in the same cycle do not overwrite the backup. After TV-off, restore through Explorer's supported IFolderView2 API in two delayed passes. The file system is never rearranged; new/renamed items are untouched.
+
+The local desktop-icons.bin snapshot survives app restarts. Restore requires the original monitors, resolution, positions, scale, icon size/spacing, and manual icon arrangement. Auto-arrange must be off. Capture failure blocks connection before APPLY; restore failure after a successful display-off produces a warning rather than incorrectly reporting display failure. Retry off to retry restoration. The next new connection captures the latest layout again. Unchecking the setting prevents new snapshots but preserves a pending restoration.
+
+Arrange your desktop once before the first connection after upgrading: earlier versions never saved it. Unplugging HDMI or changing screens outside the app does not trigger restoration. Other desktop managers and later Windows rearrangement can still interfere; this is not an unconditional guarantee. The implementation follows [Microsoft's desktop icon API guidance](https://devblogs.microsoft.com/oldnewthing/20211122-00/?p=105948).

@@ -34,6 +34,7 @@
 #define ID_QUIT_BUTTON 126
 #define ID_PRIMARY_MODE 127
 #define ID_CAPTURE_MODE 128
+#define ID_RESTORE_ICONS 129
 #ifdef TCL_TEST_BUILD
 #define APP_MUTEX_NAME L"Local\\TCLDisplayAppBehaviorTest"
 #define APP_CLASS_NAME L"TCLDisplayAppBehaviorTestWindow"
@@ -48,7 +49,7 @@ static HWND controls[3][40];
 static int ncontrols[3], current_page = 0, scale = 100, configured = 0, settings_dirty = 0;
 static int show_tray_icon = 1, close_to_background = 1, tray_present = 0;
 static UINT taskbar_created;
-static HWND tray_box, close_box, primary_box;
+static HWND tray_box, close_box, primary_box, icons_box;
 static HFONT font, title_font;
 static WCHAR monitor_ids[32][1024], pc_ip[80], ha_ip[80];
 static HANDLE thread, stop_event;
@@ -295,6 +296,8 @@ static void toggle_display(int enable) {
             enable ? L"Не удалось подключить TCL." : L"Не удалось отключить TCL.",last_error);
         error_code(details,e);
     }
+    if (!e && strcmp(last_warning,"none"))
+        message(L"Дисплей отключён, но значки не восстановлены. Проверь исходную раскладку экранов, масштаб и автоматическое упорядочивание. Повтори отключение для повторной попытки; снимок сохранён.",MB_ICONWARNING);
     update_display_status();
 }
 static DWORD run_netsh(WCHAR *arguments) {
@@ -386,7 +389,7 @@ static void build_ui(void) {
     control(2,L"BUTTON",L"Применить поведение",WS_TABSTOP,28,526,250,38,ID_SAVE_BEHAVIOR);
     control(2,L"STATIC",L"Эти настройки можно менять при работающем обработчике.",0,28,586,718,55,240);
     primary_box=control(2,L"BUTTON",L"При подключении делать ТВ основным",BS_AUTOCHECKBOX|WS_TABSTOP,28,640,718,26,ID_PRIMARY_MODE);
-    control(2,L"STATIC",L"Режим сохраняется сразу; им также управляет отдельный переключатель HA.\r\nПри отключении ТВ вернётся прежний основной монитор.",0,28,674,718,44,0);
+    icons_box=control(2,L"BUTTON",L"Сохранять и возвращать расположение значков",BS_AUTOCHECKBOX|WS_TABSTOP,28,680,718,30,ID_RESTORE_ICONS);
     status_text=CreateWindowW(L"STATIC",L"Обработчик остановлен.",WS_CHILD|WS_VISIBLE,px(28),px(730),px(556),px(40),window,NULL,instance,NULL);
     SendMessageW(status_text,WM_SETFONT,(WPARAM)font,TRUE);
     HWND quit=CreateWindowW(L"BUTTON",L"Завершить",WS_CHILD|WS_VISIBLE|WS_TABSTOP,px(610),px(730),px(136),px(32),window,(HMENU)ID_QUIT_BUTTON,instance,NULL);
@@ -415,6 +418,7 @@ static void load_ui(void) {
     SendMessageW(auto_box,BM_SETCHECK,auto_enabled?BST_CHECKED:BST_UNCHECKED,0);
     behavior_load();
     SendMessageW(primary_box, BM_SETCHECK, primary_mode_enabled() ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(icons_box,BM_SETCHECK,GetPrivateProfileIntW(L"display",L"restore_icons",1,ini)?BST_CHECKED:BST_UNCHECKED,0);
     refresh_displays(); update_display_status(); yaml_update();
     settings_dirty = 0;
     update_controls();
@@ -441,6 +445,14 @@ static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
         if (HIWORD(w)!=BN_CLICKED) return 0;
         switch(id) {
         case ID_SAVE: save_settings(); break;
+        case ID_RESTORE_ICONS: {
+            EnterCriticalSection(&display_lock);
+            BOOL ok=WritePrivateProfileStringW(L"display",L"restore_icons",
+                SendMessageW(icons_box,BM_GETCHECK,0,0)==BST_CHECKED?L"1":L"0",ini);
+            LeaveCriticalSection(&display_lock);
+            if(!ok)error_code(L"Не удалось сохранить настройку значков.",GetLastError());
+            break;
+        }
         case ID_PRIMARY_MODE: {
             EnterCriticalSection(&display_lock);
             BOOL ok = WritePrivateProfileStringW(L"display", L"make_primary",
@@ -537,7 +549,7 @@ int WINAPI WinMain(HINSTANCE inst,HINSTANCE previous,LPSTR command,int show) {
     WSADATA winsock; if(WSAStartup(MAKEWORD(2,2),&winsock)) return 1;
     WNDCLASSW cls={0};cls.lpfnWndProc=procedure;cls.hInstance=inst;cls.lpszClassName=APP_CLASS_NAME;cls.hCursor=LoadCursorW(NULL,IDC_ARROW);cls.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);cls.hIcon=LoadIconW(inst,MAKEINTRESOURCEW(101));RegisterClassW(&cls);
     RECT rect={0,0,px(780),px(784)};AdjustWindowRect(&rect,WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,FALSE);
-    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.7 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
+    window=CreateWindowW(cls.lpszClassName,L"TCL Display 1.8 — настройки",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_MINIMIZEBOX,CW_USEDEFAULT,CW_USEDEFAULT,rect.right-rect.left,rect.bottom-rect.top,NULL,NULL,inst,NULL);
     if(!window)return 1;
     tray.cbSize=sizeof(tray);tray.hWnd=window;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=cls.hIcon;wcscpy(tray.szTip,L"TCL Display — управление из Home Assistant");
     taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");tray_apply();

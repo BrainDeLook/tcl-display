@@ -200,3 +200,18 @@ async def test_windows_failure_details_reach_service_error(hass, prepared):
     prepared[1].side_effect = AgentError("win32=1610, stage=validation_failed")
     with pytest.raises(HomeAssistantError, match="win32=1610, stage=validation_failed"):
         await hass.services.async_call("switch", "turn_on", {"entity_id": entity}, blocking=True)
+
+
+async def test_icon_restore_warning_does_not_claim_display_failure(hass, prepared, caplog):
+    _, entity = await setup_entry(hass)
+    prepared[1].side_effect = None
+    prepared[1].return_value = {
+        "ok": True,
+        "enabled": False,
+        "available": True,
+        "warning": "desktop_icons_layout_changed",
+    }
+    await hass.services.async_call("switch", "turn_off", {"entity_id": entity}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(entity).state == "off"
+    assert "desktop_icons_layout_changed" in caplog.text

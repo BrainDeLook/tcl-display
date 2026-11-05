@@ -97,6 +97,13 @@ class AgentClient:
                     or not isinstance(result.get("enabled"), bool)
                     or not isinstance(result.get("available"), bool)
                     or ("make_primary" in result and not isinstance(result["make_primary"], bool))
+                    or (
+                        "warning" in result
+                        and (
+                            not isinstance(result["warning"], str)
+                            or not re.fullmatch(r"[a-z_]{1,80}", result["warning"])
+                        )
+                    )
                 ):
                     raise AgentError("invalid_response")
                 return result

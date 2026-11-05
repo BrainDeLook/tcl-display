@@ -51,6 +51,9 @@ static LONG WINAPI fake_query(UINT32 flags, UINT32 *np, DISPLAYCONFIG_PATH_INFO 
     return 0;
 }
 static LONG WINAPI fake_info(DISPLAYCONFIG_DEVICE_INFO_HEADER *h) {
+    if(h->type==DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME) {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME *n=(void*)h; wcscpy(n->viewGdiDeviceName,L"test-gdi");return 0;
+    }
     if(h->type==DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME) {
         DISPLAYCONFIG_TARGET_DEVICE_NAME *n=(void*)h;
         wcscpy(n->monitorDevicePath,names[h->id]);return 0;
@@ -92,6 +95,19 @@ static LONG WINAPI fake_set(UINT32 np, DISPLAYCONFIG_PATH_INFO *p, UINT32 nm,
 #define main unused_console_main
 #include "../src/core.c"
 #undef main
+static int icons_saves, icons_restores, icons_error;
+UINT32 desktop_display_scale(const WCHAR *name){(void)name;return 100;}
+HRESULT desktop_save(const WCHAR *folder, const DesktopTopology *topology) {
+    (void)folder; assert(topology->count);icons_saves++;
+    /* Capture before set_origin mutates source positions. */
+    int primary_count=0;
+    for(UINT32 i=0;i<topology->count;i++)if(!topology->displays[i].x && !topology->displays[i].y)primary_count++;
+    assert(primary_count==1);
+    return icons_error ? E_FAIL : S_OK;
+}
+HRESULT desktop_restore(const WCHAR *folder, const DesktopTopology *topology) {
+    (void)folder;assert(topology->count);icons_restores++;return S_OK;
+}
 static void primary(int id) {assert(on[id] && position[id].x==0 && position[id].y==0);}
 static void mode(int enabled) {assert(WritePrivateProfileStringW(L"display",L"make_primary",enabled?L"1":L"0",ini));}
 int main(void) {
@@ -107,14 +123,16 @@ int main(void) {
     assert(change_display(0)==0 && !on[2]);primary(1);
     mode(1);
     assert(change_display(1)==0 && on[2]);primary(2);
+    assert(icons_saves==2 && icons_pending());
     assert(position[0].x==-3840 && position[0].y==240); /* Relative geometry preserved. */
     saved_primary(saved);assert(!wcscmp(saved,names[1])); /* Primary was not the first path. */
     int before=applies;
-    assert(change_display(1)==0 && applies==before); /* Repeated on does not overwrite saved primary. */
+    assert(change_display(1)==0 && applies==before);assert(icons_saves==2); /* Repeated on does not overwrite saved primary. */
     saved_primary(saved);assert(!wcscmp(saved,names[1]));
     /* State is read from disk, not transient globals: survives app restart. */
     WritePrivateProfileStringW(NULL,NULL,NULL,ini);
     assert(change_display(0)==0 && !on[2]);primary(1);
+    assert(icons_restores==4 && !icons_pending());
     assert(position[0].x==-1920 && position[0].y==240);
     saved_primary(saved);assert(!saved[0]);
     /* TV already enabled in the old mode; another on still makes it primary. */
@@ -122,6 +140,13 @@ int main(void) {
     mode(1);assert(change_display(1)==0);primary(2);
     /* Disabling the preference does not forfeit the pending restoration. */
     mode(0);primary(2);assert(change_display(0)==0);primary(1);
+    /* A failed snapshot prevents the primary change before APPLY. */
+    mode(1);icons_error=1;before=applies;
+    assert(change_display(1)==ERROR_GEN_FAILURE && applies==before && !on[2]);
+    assert(!strcmp(last_error,"desktop_icons_capture_failed"));icons_error=0;
+    assert(WritePrivateProfileStringW(L"display",L"restore_icons",L"0",ini));
+    int saved_calls=icons_saves;assert(change_display(1)==0);assert(icons_saves==saved_calls);
+    assert(change_display(0)==0);assert(WritePrivateProfileStringW(L"display",L"restore_icons",L"1",ini));
     /* An absent previous monitor must not be activated. */
     mode(1);assert(change_display(1)==0);on[1]=0;connected[1]=0;
     assert(change_display(0)==0 && !on[1] && !on[2]);primary(0);

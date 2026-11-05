@@ -177,3 +177,24 @@ async def test_untrusted_agent_errors_are_not_reflected(payload):
     async with server(handler) as client:
         with pytest.raises(api.AgentError, match="agent_request_failed"):
             await client.set_enabled(True)
+
+
+async def test_safe_desktop_warning_is_preserved():
+    async def handler(request):
+        return web.json_response(
+            {"ok": True, "enabled": False, "available": True, "warning": "desktop_icons_layout_changed"}
+        )
+
+    async with server(handler) as client:
+        assert (await client.set_enabled(False))["warning"] == "desktop_icons_layout_changed"
+
+
+async def test_untrusted_warning_is_rejected_at_boundary():
+    async def handler(request):
+        return web.json_response(
+            {"ok": True, "enabled": False, "available": True, "warning": "private arbitrary string"}
+        )
+
+    async with server(handler) as client:
+        with pytest.raises(api.AgentError, match="invalid_response"):
+            await client.set_enabled(False)

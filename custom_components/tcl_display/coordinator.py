@@ -52,6 +52,8 @@ class DisplayCoordinator(DataUpdateCoordinator[DisplayData]):
         async with self.command_lock:
             try:
                 status = await self.client.set_enabled(enabled)
+                if status.get("warning", "none") != "none":
+                    _LOGGER.warning("Display command completed with warning: %s", status["warning"])
             except InvalidAuth as err:
                 raise ConfigEntryAuthFailed("Invalid Windows agent key") from err
             except AgentError as err:
